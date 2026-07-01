@@ -161,37 +161,64 @@ extension EditorViewModel {
         }
     }
 
+    private struct TranscribeJob {
+        let mediaRef: String
+        let url: URL
+        let range: ClosedRange<Double>?
+        let isVideo: Bool
+    }
+
     private func transcribe(_ targets: [CaptionTarget], request: CaptionRequest) async throws -> [String: TranscriptionResult] {
+        let targetClips = targets.map(\.clip)
+        var seen: Set<String> = []
+        let jobs: [TranscribeJob] = targets.compactMap { t in
+            guard seen.insert(t.clip.mediaRef).inserted else { return nil }
+            guard let url = mediaResolver.resolveURL(for: t.clip.mediaRef) else { return nil }
+            let range = CaptionTranscriptMapper.sourceUnion(for: t.clip.mediaRef, clips: targetClips, fps: timeline.fps)
+            return TranscribeJob(mediaRef: t.clip.mediaRef, url: url, range: range, isVideo: captionUsesVideoAudioExtraction(for: t.clip))
+        }
+        let projectId = projectId
+
+        let outcomes = await withTaskGroup(of: (String, Result<TranscriptionResult, Error>).self) { group in
+            for job in jobs {
+                group.addTask {
+                    do {
+                        let result: TranscriptionResult
+                        switch request.provider {
+                        case .local:
+                            if request.censorProfanity || request.locale != nil {
+                                // option variants produce different transcripts — bypass the cache
+                                result = job.isVideo
+                                    ? try await Transcription.transcribeVideoAudio(videoURL: job.url, censorProfanity: request.censorProfanity, preferredLocale: request.locale, sourceRange: job.range)
+                                    : try await Transcription.transcribe(fileURL: job.url, censorProfanity: request.censorProfanity, preferredLocale: request.locale, sourceRange: job.range)
+                            } else {
+                                result = try await TranscriptCache.shared.transcript(for: job.url, isVideo: job.isVideo, range: job.range)
+                            }
+                        case .cloud:
+                            result = try await CloudTranscription.transcribe(
+                                fileURL: job.url,
+                                range: job.range,
+                                preferredLocale: request.locale,
+                                projectId: projectId
+                            )
+                        }
+                        return (job.mediaRef, .success(result))
+                    } catch {
+                        return (job.mediaRef, .failure(error))
+                    }
+                }
+            }
+            var collected: [(String, Result<TranscriptionResult, Error>)] = []
+            for await outcome in group { collected.append(outcome) }
+            return collected
+        }
+
         var results: [String: TranscriptionResult] = [:]
         var firstError: Error?
-        let targetClips = targets.map(\.clip)
-        for t in targets where results[t.clip.mediaRef] == nil {
-            do {
-                guard let url = mediaResolver.resolveURL(for: t.clip.mediaRef) else { continue }
-                let range = CaptionTranscriptMapper.sourceUnion(for: t.clip.mediaRef, clips: targetClips, fps: timeline.fps)
-                let isVideo = captionUsesVideoAudioExtraction(for: t.clip)
-                let result: TranscriptionResult
-                switch request.provider {
-                case .local:
-                    if request.censorProfanity || request.locale != nil {
-                        // option variants produce different transcripts — bypass the cache
-                        result = isVideo
-                            ? try await Transcription.transcribeVideoAudio(videoURL: url, censorProfanity: request.censorProfanity, preferredLocale: request.locale, sourceRange: range)
-                            : try await Transcription.transcribe(fileURL: url, censorProfanity: request.censorProfanity, preferredLocale: request.locale, sourceRange: range)
-                    } else {
-                        result = try await TranscriptCache.shared.transcript(for: url, isVideo: isVideo, range: range)
-                    }
-                case .cloud:
-                    result = try await CloudTranscription.transcribe(
-                        fileURL: url,
-                        range: range,
-                        preferredLocale: request.locale,
-                        projectId: projectId
-                    )
-                }
-                results[t.clip.mediaRef] = result
-            } catch {
-                firstError = firstError ?? error
+        for (mediaRef, outcome) in outcomes {
+            switch outcome {
+            case .success(let result): results[mediaRef] = result
+            case .failure(let error): firstError = firstError ?? error
             }
         }
         if results.isEmpty, let firstError { throw firstError }

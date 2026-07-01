@@ -135,7 +135,7 @@ extension ToolExecutor {
             )
         }
         let account = AccountService.shared
-        let provider: TranscriptionProvider = account.isSignedIn && account.isPaid && account.hasCredits ? .cloud : .local
+        let provider: TranscriptionProvider = account.isSignedIn && account.hasCredits ? .cloud : .local
         return TranscriptionToolContext(
             provider: provider,
             preferredLocale: provider == .cloud ? nil : try await Self.parseLocale(args, path: path)
@@ -156,10 +156,8 @@ extension ToolExecutor {
         let cost = await editor.captionCloudCreditCost(for: request)
         let account = AccountService.shared
         guard account.isSignedIn else { throw ToolError("Sign in to use Cloud transcription.") }
-        guard account.isPaid else { throw ToolError("Subscribe to use Cloud transcription.") }
         guard cost > 0 else { return }
-        guard let budget = account.budgetCredits else { return }
-        let remaining = max(0, budget - account.spentCredits)
+        let remaining = account.remainingCredits
         guard remaining > 0 else { throw ToolError("Add credits to use Cloud transcription.") }
         if cost > remaining {
             throw ToolError("\(CostEstimator.format(cost)) needed. Only \(remaining.formatted()) remaining.")
@@ -257,29 +255,43 @@ extension ToolExecutor {
         context: TranscriptionToolContext,
         isVideoByURL: [URL: Bool]
     ) async -> (results: [URL: TranscriptionResult], skipped: [[String: Any]]) {
+        let rangesByURL = sourceRangesByURL(fragments, fps: fps)
+        let outcomes = await withTaskGroup(of: (URL, Result<TranscriptionResult, Error>).self) { group in
+            for url in Set(fragments.map(\.url)) {
+                group.addTask {
+                    do {
+                        switch context.provider {
+                        case .local:
+                            return (url, .success(try await TranscriptCache.shared.transcript(
+                                for: url,
+                                isVideo: isVideoByURL[url] ?? true,
+                                range: nil,
+                                preferredLocale: context.preferredLocale
+                            )))
+                        case .cloud:
+                            return (url, .success(try await CloudTranscription.transcribe(
+                                fileURL: url,
+                                range: rangesByURL[url],
+                                preferredLocale: nil,
+                                projectId: projectId
+                            )))
+                        }
+                    } catch {
+                        return (url, .failure(error))
+                    }
+                }
+            }
+            var collected: [(URL, Result<TranscriptionResult, Error>)] = []
+            for await outcome in group { collected.append(outcome) }
+            return collected
+        }
+
         var results: [URL: TranscriptionResult] = [:]
         var skipped: [[String: Any]] = []
-        let rangesByURL = sourceRangesByURL(fragments, fps: fps)
-        for url in Set(fragments.map(\.url)) {
-            do {
-                switch context.provider {
-                case .local:
-                    results[url] = try await TranscriptCache.shared.transcript(
-                        for: url,
-                        isVideo: isVideoByURL[url] ?? true,
-                        range: nil,
-                        preferredLocale: context.preferredLocale
-                    )
-                case .cloud:
-                    results[url] = try await CloudTranscription.transcribe(
-                        fileURL: url,
-                        range: rangesByURL[url],
-                        preferredLocale: nil,
-                        projectId: projectId
-                    )
-                }
-            } catch {
-                skipped.append(["file": url.lastPathComponent, "reason": error.localizedDescription])
+        for (url, outcome) in outcomes {
+            switch outcome {
+            case .success(let transcript): results[url] = transcript
+            case .failure(let error): skipped.append(["file": url.lastPathComponent, "reason": error.localizedDescription])
             }
         }
         return (results, skipped)
