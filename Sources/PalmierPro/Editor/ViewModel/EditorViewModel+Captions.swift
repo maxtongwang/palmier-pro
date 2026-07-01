@@ -136,20 +136,24 @@ extension EditorViewModel {
         let targetClips = targets.map(\.clip)
         let language = CloudTranscription.languageIdentifier(request.locale)
         var seen: Set<String> = []
-        var missingSeconds = 0.0
+        var totalCost = 0
         for t in targets where seen.insert(t.clip.mediaRef).inserted {
             guard let url = mediaResolver.resolveURL(for: t.clip.mediaRef) else { continue }
             let range = CaptionTranscriptMapper.sourceUnion(for: t.clip.mediaRef, clips: targetClips, fps: timeline.fps)
             if await TranscriptCache.shared.hasCachedCloudTranscript(for: url, range: range, language: language) {
                 continue
             }
+            let seconds: Double
             if let range {
-                missingSeconds += max(0, range.upperBound - range.lowerBound)
+                seconds = max(0, range.upperBound - range.lowerBound)
             } else if let asset = mediaAssets.first(where: { $0.id == t.clip.mediaRef }) {
-                missingSeconds += max(0, asset.duration)
+                seconds = max(0, asset.duration)
+            } else {
+                seconds = 0
             }
+            totalCost += CostEstimator.estimatedTranscriptionCost(durationSeconds: seconds) ?? 0
         }
-        return CostEstimator.estimatedTranscriptionCost(durationSeconds: missingSeconds) ?? 0
+        return totalCost
     }
 
     private func resolvedCaptionTargets(for request: CaptionRequest) -> [CaptionTarget] {
