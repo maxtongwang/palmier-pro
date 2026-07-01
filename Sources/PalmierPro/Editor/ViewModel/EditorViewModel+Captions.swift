@@ -275,7 +275,6 @@ extension EditorViewModel {
         defer { undoManager?.endUndoGrouping() }
         let before = timeline
         undoManager?.disableUndoRegistration()
-        timeline.tracks.removeAll(where: isGeneratedCaptionTrack)
         timeline.tracks.insert(Track(type: .video), at: 0)
         let ids = placeTextClips(specs, clearExistingRegions: false, refreshVisuals: false)
         undoManager?.enableUndoRegistration()
@@ -287,11 +286,5 @@ extension EditorViewModel {
         registerTimelineSwap(undoState: before, redoState: timeline, actionName: "Generate Captions")
         notifyTimelineChanged(refreshVisuals: false)
         return ids
-    }
-
-    private func isGeneratedCaptionTrack(_ track: Track) -> Bool {
-        track.type == .video
-            && !track.clips.isEmpty
-            && track.clips.allSatisfy { $0.mediaType == .text && $0.captionGroupId != nil }
     }
 }
