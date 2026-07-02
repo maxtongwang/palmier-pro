@@ -17,7 +17,6 @@ struct MediaTab: View {
     @State var folderReturnViewMode: ViewMode?
     @State var renamingFolderId: String?
     @State var renamingTimelineId: String?
-    @State var pendingFolderFocusId: String?
     @State var dropTargetFolderId: String?
     /// Hovered grouped-section key; "" = root.
     @State var dropTargetGroupedKey: String?
@@ -224,7 +223,6 @@ struct MediaTab: View {
     private func pruneStaleFolderState() {
         if let id = currentFolderId, editor.folder(id: id) == nil { navigateToFolder(nil) }
         if let id = renamingFolderId, editor.folder(id: id) == nil { renamingFolderId = nil }
-        if let id = pendingFolderFocusId, editor.folder(id: id) == nil { pendingFolderFocusId = nil }
         if let id = dropTargetFolderId, editor.folder(id: id) == nil { dropTargetFolderId = nil }
     }
 
@@ -636,7 +634,6 @@ struct MediaTab: View {
 
     private func createNewFolderInCurrent() {
         let id = editor.createFolder(name: "New Folder", in: currentFolderId)
-        pendingFolderFocusId = id
         renamingFolderId = id
     }
 

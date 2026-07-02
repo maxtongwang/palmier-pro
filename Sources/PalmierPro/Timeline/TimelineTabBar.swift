@@ -3,8 +3,6 @@ import SwiftUI
 struct TimelineTabBar: View {
     @Environment(EditorViewModel.self) private var editor
     @State private var renamingTabId: String?
-    @State private var renameDraft = ""
-    @FocusState private var renameFocused: Bool
 
     private var openTimelines: [Timeline] {
         editor.openTimelineIds.compactMap { editor.timeline(for: $0) }
@@ -80,29 +78,21 @@ struct TimelineTabBar: View {
     }
 
     private func renameField(_ timeline: Timeline) -> some View {
-        TextField("", text: $renameDraft)
-            .textFieldStyle(.plain)
-            .font(.system(size: AppTheme.FontSize.xs, weight: AppTheme.FontWeight.semibold))
-            .foregroundStyle(AppTheme.Text.primaryColor)
-            .frame(width: AppTheme.ComponentSize.timelineTabRenameWidth)
-            .focused($renameFocused)
-            .onSubmit { commitRename(timeline.id) }
-            .onExitCommand { renamingTabId = nil }
-            .onChange(of: renameFocused) { _, focused in
-                if !focused { commitRename(timeline.id) }
-            }
+        InlineRenameField(
+            originalName: timeline.name,
+            font: .system(size: AppTheme.FontSize.xs, weight: AppTheme.FontWeight.semibold),
+            onCommit: { name in
+                editor.renameTimeline(timeline.id, to: name)
+                renamingTabId = nil
+            },
+            onCancel: { renamingTabId = nil }
+        )
+        .foregroundStyle(AppTheme.Text.primaryColor)
+        .frame(width: AppTheme.ComponentSize.timelineTabRenameWidth)
     }
 
     private func beginRename(_ timeline: Timeline) {
-        renameDraft = timeline.name
         renamingTabId = timeline.id
-        DispatchQueue.main.async { renameFocused = true }
-    }
-
-    private func commitRename(_ id: String) {
-        guard renamingTabId == id else { return }
-        renamingTabId = nil
-        editor.renameTimeline(id, to: renameDraft)
     }
 
     private var addButton: some View {

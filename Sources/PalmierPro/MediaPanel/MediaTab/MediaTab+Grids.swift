@@ -422,7 +422,7 @@ extension MediaTab {
             onDelete: { editor.deleteTimeline(timeline.id) }
         )
         .draggable(MediaTab.timelineDragString(forTimelineId: timeline.id)) {
-            TimelineDragPreview(name: timeline.name)
+            TileDragPreview(icon: "film.stack", name: timeline.name)
         }
     }
 
@@ -474,12 +474,10 @@ extension MediaTab {
                     renamingFolderId = nil
                 },
                 onCancelRename: { renamingFolderId = nil },
-                onDelete: { editor.deleteFolders(ids: [folder.id]) },
-                shouldAutoFocus: pendingFolderFocusId == folder.id,
-                onAutoFocusConsumed: { pendingFolderFocusId = nil }
+                onDelete: { editor.deleteFolders(ids: [folder.id]) }
             )
             .draggable(MediaTab.folderDragString(forFolderId: folder.id)) {
-                FolderDragPreview(name: folder.name)
+                TileDragPreview(icon: "folder.fill", name: folder.name)
             }
         }
         .onDrop(of: [.fileURL, .text], isTargeted: dropHover) { providers in
@@ -512,7 +510,6 @@ extension MediaTab {
             Button("New Folder") {
                 let id = editor.createFolder(name: "New Folder", in: currentFolderId)
                 editor.moveAssetsToFolder(assetIds: targetIds, folderId: id)
-                pendingFolderFocusId = id
                 renamingFolderId = id
             }
             if currentFolderId != nil || targetIds.contains(where: { id in editor.mediaAssets.first(where: { $0.id == id })?.folderId != nil }) {
@@ -548,11 +545,12 @@ struct AssetFramePreferenceKey: PreferenceKey {
     }
 }
 
-private struct FolderDragPreview: View {
+private struct TileDragPreview: View {
+    let icon: String
     let name: String
     var body: some View {
         HStack(spacing: AppTheme.Spacing.xs) {
-            Image(systemName: "folder.fill")
+            Image(systemName: icon)
                 .foregroundStyle(AppTheme.Accent.primary)
             Text(name)
                 .font(.system(size: AppTheme.FontSize.sm, weight: .medium))
