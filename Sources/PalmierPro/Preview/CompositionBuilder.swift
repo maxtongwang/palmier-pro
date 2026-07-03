@@ -34,9 +34,9 @@ enum CompositionBuilder {
 
     static func build(
         timeline: Timeline,
-        resolveURL: @Sendable (String) -> URL?,
-        resolveSourceSize: @Sendable (String) -> CGSize? = { _ in nil },
-        resolveTimeline: @Sendable (String) -> Timeline? = { _ in nil },
+        resolveURL: @escaping @Sendable (String) -> URL?,
+        resolveSourceSize: @escaping @Sendable (String) -> CGSize? = { _ in nil },
+        resolveTimeline: @escaping @Sendable (String) -> Timeline? = { _ in nil },
         missingMediaRefs: Set<String> = [],
         renderSize: CGSize
     ) async throws -> CompositionResult {
@@ -45,13 +45,15 @@ enum CompositionBuilder {
             Log.preview.fault("build: invalid timeline fps=\(timeline.fps) size=\(timeline.width)x\(timeline.height)")
             throw InvalidTimelineError(reason: "fps=\(timeline.fps) size=\(timeline.width)x\(timeline.height)")
         }
-        let composition = AVMutableComposition()
-        let timescale = CMTimeScale(timeline.fps)
-        var trackMappings: [TrackMapping] = []
-        var clipNaturalSizes: [String: CGSize] = [:]
-        var clipTransforms: [String: CGAffineTransform] = [:]
-        var offlineMediaRefs: Set<String> = []
-        var unprocessableMediaRefs: Set<String> = []
+        let ctx = BuildContext(
+            composition: AVMutableComposition(),
+            timescale: CMTimeScale(timeline.fps),
+            renderSize: renderSize,
+            resolveURL: resolveURL,
+            resolveSourceSize: resolveSourceSize,
+            resolveTimeline: resolveTimeline,
+            missingMediaRefs: missingMediaRefs
+        )
 
         for (trackIdx, track) in timeline.tracks.enumerated() {
             // Text is composited at render, not as a track.
@@ -59,188 +61,200 @@ enum CompositionBuilder {
                 .sorted { $0.startFrame < $1.startFrame }
                 .filter { $0.mediaType != .text }
             guard !sortedClips.isEmpty else { continue }
-            let isAudio = track.type == .audio
-            let mediaType: AVMediaType = isAudio ? .audio : .video
-
-            if isAudio {
-                var normalTrack: AVMutableCompositionTrack?
-                var normalClipIds = Set<String>()
-                var normalCursor = CMTime.zero
-
-                var previousAudioEnd = Int.min
-                for clip in sortedClips {
-                    guard clip.durationFrames > 0, clip.startFrame >= previousAudioEnd else { continue }
-                    previousAudioEnd = clip.endFrame
-                    if clip.sourceClipType == .sequence {
-                        try await expandNestAudio(
-                            carrier: clip, topCarrier: clip, volumeScale: 1.0,
-                            parentTrackIndex: trackIdx, depth: 0,
-                            composition: composition, timescale: timescale, renderSize: renderSize,
-                            resolveTimeline: resolveTimeline, resolveURL: resolveURL,
-                            resolveSourceSize: resolveSourceSize, missingMediaRefs: missingMediaRefs,
-                            trackMappings: &trackMappings, offlineMediaRefs: &offlineMediaRefs,
-                            unprocessableMediaRefs: &unprocessableMediaRefs
-                        )
-                        continue
-                    }
-                    let source: (asset: AVURLAsset, track: AVAssetTrack)
-                    switch try await loadSource(
-                        clip: clip,
-                        mediaType: mediaType,
-                        resolveURL: resolveURL,
-                        resolveSourceSize: resolveSourceSize,
-                        missingMediaRefs: missingMediaRefs,
-                        renderSize: renderSize
-                    ) {
-                    case .loaded(let asset, let track): source = (asset, track)
-                    case .offline: offlineMediaRefs.insert(clip.mediaRef); continue
-                    case .unprocessable: unprocessableMediaRefs.insert(clip.mediaRef); continue
-                    }
-
-                    if normalTrack == nil {
-                        normalTrack = composition.addMutableTrack(
-                            withMediaType: mediaType,
-                            preferredTrackID: kCMPersistentTrackID_Invalid
-                        )
-                    }
-                    guard let compTrack = normalTrack else { continue }
-                    if await insertClip(
-                        clip,
-                        sourceAsset: source.asset,
-                        sourceTrack: source.track,
-                        into: compTrack,
-                        cursor: &normalCursor,
-                        timescale: timescale
-                    ) {
-                        normalClipIds.insert(clip.id)
-                    }
-                }
-
-                if let normalTrack {
-                    if normalClipIds.isEmpty {
-                        composition.removeTrack(normalTrack)
-                    } else {
-                        trackMappings.append(TrackMapping(
-                            compositionTrack: normalTrack,
-                            kind: .timeline(trackIndex: trackIdx, clipIds: normalClipIds),
-                            naturalSize: .zero,
-                            endTime: .zero,
-                            isVideo: false
-                        ))
-                    }
-                }
-                continue
+            if track.type == .audio {
+                try await insertAudioLane(clips: sortedClips, parentTrackIndex: trackIdx, nest: nil, depth: 0, ctx: ctx)
+            } else {
+                try await insertVideoLane(clips: sortedClips, parentTrackIndex: trackIdx, nestCarrier: nil, depth: 0, ctx: ctx)
             }
-
-            guard let compTrack = composition.addMutableTrack(
-                withMediaType: mediaType,
-                preferredTrackID: kCMPersistentTrackID_Invalid
-            ) else { continue }
-
-            var cursor = CMTime.zero
-            var insertedCount = 0
-            var insertedClipIds = Set<String>()
-            var previousEndFrame = Int.min
-            for clip in sortedClips {
-                guard clip.durationFrames > 0, clip.startFrame >= previousEndFrame else { continue }
-                if clip.mediaType == .sequence {
-                    try await expandNestVideo(
-                        carrier: clip, parentTrackIndex: trackIdx, depth: 0,
-                        composition: composition, timescale: timescale, renderSize: renderSize,
-                        resolveTimeline: resolveTimeline, resolveURL: resolveURL,
-                        resolveSourceSize: resolveSourceSize, missingMediaRefs: missingMediaRefs,
-                        trackMappings: &trackMappings, clipNaturalSizes: &clipNaturalSizes,
-                        clipTransforms: &clipTransforms, offlineMediaRefs: &offlineMediaRefs,
-                        unprocessableMediaRefs: &unprocessableMediaRefs
-                    )
-                    previousEndFrame = clip.endFrame
-                    continue
-                }
-                let source: (asset: AVURLAsset, track: AVAssetTrack)
-                switch try await loadSource(
-                    clip: clip,
-                    mediaType: mediaType,
-                    resolveURL: resolveURL,
-                    resolveSourceSize: resolveSourceSize,
-                    missingMediaRefs: missingMediaRefs,
-                    renderSize: renderSize
-                ) {
-                case .loaded(let asset, let track): source = (asset, track)
-                case .offline: offlineMediaRefs.insert(clip.mediaRef); continue
-                case .unprocessable: unprocessableMediaRefs.insert(clip.mediaRef); continue
-                }
-
-                if let natSize = try? await source.track.load(.naturalSize),
-                   natSize.width > 0, natSize.height > 0 {
-                    // Store clip display size and transform with origin at (0,0)
-                    let pt = (try? await source.track.load(.preferredTransform)) ?? .identity
-                    let box = CGRect(origin: .zero, size: natSize).applying(pt)
-                    clipNaturalSizes[clip.id] = CGSize(width: abs(box.width), height: abs(box.height))
-                    clipTransforms[clip.id] = pt.concatenating(CGAffineTransform(translationX: -box.minX, y: -box.minY))
-                }
-
-                if await insertClip(
-                    clip,
-                    sourceAsset: source.asset,
-                    sourceTrack: source.track,
-                    into: compTrack,
-                    cursor: &cursor,
-                    timescale: timescale
-                ) {
-                    insertedCount += 1
-                    insertedClipIds.insert(clip.id)
-                    previousEndFrame = clip.endFrame
-                }
-            }
-
-            guard insertedCount > 0 else {
-                composition.removeTrack(compTrack)
-                continue
-            }
-            let naturalSize = (try? await compTrack.load(.naturalSize)).flatMap { $0.width > 0 && $0.height > 0 ? $0 : nil } ?? renderSize
-            trackMappings.append(TrackMapping(
-                compositionTrack: compTrack,
-                kind: .timeline(trackIndex: trackIdx, clipIds: insertedClipIds),
-                naturalSize: naturalSize,
-                endTime: cursor,
-                isVideo: true
-            ))
         }
 
         guard !Task.isCancelled else { throw CancellationError() }
 
         // Opaque black background layer (bottommost) for full timeline
-        let lastVideoEnd = trackMappings.filter(\.isVideo).map(\.endTime).max() ?? .zero
-        let desiredDuration = max(CMTime(value: CMTimeValue(timeline.totalFrames), timescale: timescale), lastVideoEnd)
+        let lastVideoEnd = ctx.trackMappings.filter(\.isVideo).map(\.endTime).max() ?? .zero
+        let desiredDuration = max(CMTime(value: CMTimeValue(timeline.totalFrames), timescale: ctx.timescale), lastVideoEnd)
         if desiredDuration > .zero {
             if let mapping = try await insertBlackBackground(
-                composition: composition,
+                composition: ctx.composition,
                 size: renderSize,
                 range: CMTimeRange(start: .zero, duration: desiredDuration)
             ) {
-                trackMappings.append(mapping)
+                ctx.trackMappings.append(mapping)
             }
         }
 
         let (audioMix, videoComposition) = buildVisuals(
             timeline: timeline,
-            trackMappings: trackMappings,
-            clipNaturalSizes: clipNaturalSizes,
-            clipTransforms: clipTransforms,
+            trackMappings: ctx.trackMappings,
+            clipNaturalSizes: ctx.clipNaturalSizes,
+            clipTransforms: ctx.clipTransforms,
             resolveTimeline: resolveTimeline,
-            compositionDuration: composition.duration,
+            compositionDuration: ctx.composition.duration,
             renderSize: renderSize
         )
 
         return CompositionResult(
-            composition: composition,
+            composition: ctx.composition,
             audioMix: audioMix,
             videoComposition: videoComposition,
-            trackMappings: trackMappings,
-            clipNaturalSizes: clipNaturalSizes,
-            clipTransforms: clipTransforms,
-            offlineMediaRefs: offlineMediaRefs,
-            unprocessableMediaRefs: unprocessableMediaRefs
+            trackMappings: ctx.trackMappings,
+            clipNaturalSizes: ctx.clipNaturalSizes,
+            clipTransforms: ctx.clipTransforms,
+            offlineMediaRefs: ctx.offlineMediaRefs,
+            unprocessableMediaRefs: ctx.unprocessableMediaRefs
+        )
+    }
+
+    /// Everything a build pass threads through insertion: inputs plus accumulators.
+    private final class BuildContext {
+        let composition: AVMutableComposition
+        let timescale: CMTimeScale
+        let renderSize: CGSize
+        let resolveURL: @Sendable (String) -> URL?
+        let resolveSourceSize: @Sendable (String) -> CGSize?
+        let resolveTimeline: @Sendable (String) -> Timeline?
+        let missingMediaRefs: Set<String>
+        var trackMappings: [TrackMapping] = []
+        var clipNaturalSizes: [String: CGSize] = [:]
+        var clipTransforms: [String: CGAffineTransform] = [:]
+        var offlineMediaRefs: Set<String> = []
+        var unprocessableMediaRefs: Set<String> = []
+
+        init(
+            composition: AVMutableComposition,
+            timescale: CMTimeScale,
+            renderSize: CGSize,
+            resolveURL: @escaping @Sendable (String) -> URL?,
+            resolveSourceSize: @escaping @Sendable (String) -> CGSize?,
+            resolveTimeline: @escaping @Sendable (String) -> Timeline?,
+            missingMediaRefs: Set<String>
+        ) {
+            self.composition = composition
+            self.timescale = timescale
+            self.renderSize = renderSize
+            self.resolveURL = resolveURL
+            self.resolveSourceSize = resolveSourceSize
+            self.resolveTimeline = resolveTimeline
+            self.missingMediaRefs = missingMediaRefs
+        }
+    }
+
+    /// One lane of video clips → at most one composition track; sequence clips expand recursively.
+    private static func insertVideoLane(
+        clips: [Clip],
+        parentTrackIndex: Int,
+        nestCarrier: Clip?,
+        depth: Int,
+        ctx: BuildContext
+    ) async throws {
+        var compTrack: AVMutableCompositionTrack?
+        var cursor = CMTime.zero
+        var inserted: [Clip] = []
+        var previousEndFrame = Int.min
+        for clip in clips {
+            guard clip.durationFrames > 0, clip.startFrame >= previousEndFrame else { continue }
+            if clip.mediaType == .text { continue }   // text renders in instructions, nests render it in groups
+            if clip.mediaType == .sequence {
+                try await expandNestVideo(carrier: clip, parentTrackIndex: parentTrackIndex, depth: depth, ctx: ctx)
+                previousEndFrame = clip.endFrame
+                continue
+            }
+            let source: (asset: AVURLAsset, track: AVAssetTrack)
+            switch try await loadSource(clip: clip, mediaType: .video, ctx: ctx) {
+            case .loaded(let asset, let track): source = (asset, track)
+            case .offline: ctx.offlineMediaRefs.insert(clip.mediaRef); continue
+            case .unprocessable: ctx.unprocessableMediaRefs.insert(clip.mediaRef); continue
+            }
+            if compTrack == nil {
+                compTrack = ctx.composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid)
+            }
+            guard let track = compTrack else { continue }
+            await recordSourceGeometry(for: clip, sourceTrack: source.track, ctx: ctx)
+            if await insertClip(clip, sourceAsset: source.asset, sourceTrack: source.track,
+                                into: track, cursor: &cursor, timescale: ctx.timescale) {
+                inserted.append(clip)
+                previousEndFrame = clip.endFrame
+            }
+        }
+        guard let compTrack else { return }
+        guard !inserted.isEmpty else {
+            ctx.composition.removeTrack(compTrack)
+            return
+        }
+        let naturalSize = (try? await compTrack.load(.naturalSize)).flatMap { $0.width > 0 && $0.height > 0 ? $0 : nil } ?? ctx.renderSize
+        let kind: TrackMapping.Kind = nestCarrier.map { .nested(clips: inserted, carrier: $0, parentTrackIndex: parentTrackIndex) }
+            ?? .timeline(trackIndex: parentTrackIndex, clipIds: Set(inserted.map(\.id)))
+        ctx.trackMappings.append(TrackMapping(
+            compositionTrack: compTrack, kind: kind, naturalSize: naturalSize, endTime: cursor, isVideo: true
+        ))
+    }
+
+    /// One lane of audio clips → at most one shared composition track (per-lane clips never overlap).
+    private static func insertAudioLane(
+        clips: [Clip],
+        parentTrackIndex: Int,
+        nest: (topCarrier: Clip, volumeScale: Double)?,
+        depth: Int,
+        ctx: BuildContext
+    ) async throws {
+        var compTrack: AVMutableCompositionTrack?
+        var cursor = CMTime.zero
+        var inserted: [Clip] = []
+        var previousEndFrame = Int.min
+        for var clip in clips {
+            guard clip.durationFrames > 0, clip.startFrame >= previousEndFrame else { continue }
+            previousEndFrame = clip.endFrame
+            if clip.sourceClipType == .sequence {
+                try await expandNestAudio(
+                    carrier: clip,
+                    topCarrier: nest?.topCarrier ?? clip,
+                    volumeScale: nest.map { $0.volumeScale * clip.volume } ?? 1.0,
+                    parentTrackIndex: parentTrackIndex, depth: depth, ctx: ctx
+                )
+                continue
+            }
+            if let nest { clip.volume *= nest.volumeScale }
+            let source: (asset: AVURLAsset, track: AVAssetTrack)
+            switch try await loadSource(clip: clip, mediaType: .audio, ctx: ctx) {
+            case .loaded(let asset, let track): source = (asset, track)
+            case .offline: ctx.offlineMediaRefs.insert(clip.mediaRef); continue
+            case .unprocessable: ctx.unprocessableMediaRefs.insert(clip.mediaRef); continue
+            }
+            if compTrack == nil {
+                compTrack = ctx.composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid)
+            }
+            guard let track = compTrack else { continue }
+            if await insertClip(clip, sourceAsset: source.asset, sourceTrack: source.track,
+                                into: track, cursor: &cursor, timescale: ctx.timescale) {
+                inserted.append(clip)
+            }
+        }
+        guard let compTrack else { return }
+        guard !inserted.isEmpty else {
+            ctx.composition.removeTrack(compTrack)
+            return
+        }
+        let kind: TrackMapping.Kind = nest.map { .nested(clips: inserted, carrier: $0.topCarrier, parentTrackIndex: parentTrackIndex) }
+            ?? .timeline(trackIndex: parentTrackIndex, clipIds: Set(inserted.map(\.id)))
+        ctx.trackMappings.append(TrackMapping(
+            compositionTrack: compTrack, kind: kind, naturalSize: .zero, endTime: .zero, isVideo: false
+        ))
+    }
+
+    private static func recordSourceGeometry(for clip: Clip, sourceTrack: AVAssetTrack, ctx: BuildContext) async {
+        guard let natSize = try? await sourceTrack.load(.naturalSize), natSize.width > 0, natSize.height > 0 else { return }
+        // Store clip display size and transform with origin at (0,0)
+        let pt = (try? await sourceTrack.load(.preferredTransform)) ?? .identity
+        let box = CGRect(origin: .zero, size: natSize).applying(pt)
+        ctx.clipNaturalSizes[clip.id] = CGSize(width: abs(box.width), height: abs(box.height))
+        ctx.clipTransforms[clip.id] = pt.concatenating(CGAffineTransform(translationX: -box.minX, y: -box.minY))
+    }
+
+    private static func loadSource(clip: Clip, mediaType: AVMediaType, ctx: BuildContext) async throws -> LoadOutcome {
+        try await loadSource(
+            clip: clip, mediaType: mediaType, resolveURL: ctx.resolveURL,
+            resolveSourceSize: ctx.resolveSourceSize, missingMediaRefs: ctx.missingMediaRefs,
+            renderSize: ctx.renderSize
         )
     }
 
@@ -382,180 +396,39 @@ enum CompositionBuilder {
         )
     }
 
-    /// Insert a nest's child video clips as composition tracks (one per child track).
-    private static func expandNestVideo(
-        carrier: Clip,
-        parentTrackIndex: Int,
-        depth: Int,
-        composition: AVMutableComposition,
-        timescale: CMTimeScale,
-        renderSize: CGSize,
-        resolveTimeline: @Sendable (String) -> Timeline?,
-        resolveURL: @Sendable (String) -> URL?,
-        resolveSourceSize: @Sendable (String) -> CGSize?,
-        missingMediaRefs: Set<String>,
-        trackMappings: inout [TrackMapping],
-        clipNaturalSizes: inout [String: CGSize],
-        clipTransforms: inout [String: CGAffineTransform],
-        offlineMediaRefs: inout Set<String>,
-        unprocessableMediaRefs: inout Set<String>
-    ) async throws {
+    private static func expandNestVideo(carrier: Clip, parentTrackIndex: Int, depth: Int, ctx: BuildContext) async throws {
         guard depth < NestFlattener.maxDepth else {
             Log.preview.warning("nest depth limit reached; skipping \(carrier.mediaRef.prefix(8))")
             return
         }
-        guard let child = resolveTimeline(carrier.mediaRef) else {
-            offlineMediaRefs.insert(carrier.mediaRef)
+        guard let child = ctx.resolveTimeline(carrier.mediaRef) else {
+            ctx.offlineMediaRefs.insert(carrier.mediaRef)
             return
         }
         let flat = NestFlattener.flatten(carrier: carrier, child: child, visual: true)
         for childClips in flat.videoTracks {
-            var compTrack: AVMutableCompositionTrack?
-            var cursor = CMTime.zero
-            var inserted: [Clip] = []
-            var previousEndFrame = Int.min
-            for clip in childClips {
-                guard clip.durationFrames > 0, clip.startFrame >= previousEndFrame else { continue }
-                if clip.mediaType == .text { continue }   // text renders inside the group
-                if clip.mediaType == .sequence {
-                    try await expandNestVideo(
-                        carrier: clip, parentTrackIndex: parentTrackIndex, depth: depth + 1,
-                        composition: composition, timescale: timescale, renderSize: renderSize,
-                        resolveTimeline: resolveTimeline, resolveURL: resolveURL,
-                        resolveSourceSize: resolveSourceSize, missingMediaRefs: missingMediaRefs,
-                        trackMappings: &trackMappings, clipNaturalSizes: &clipNaturalSizes,
-                        clipTransforms: &clipTransforms, offlineMediaRefs: &offlineMediaRefs,
-                        unprocessableMediaRefs: &unprocessableMediaRefs
-                    )
-                    previousEndFrame = clip.endFrame
-                    continue
-                }
-                let source: (asset: AVURLAsset, track: AVAssetTrack)
-                switch try await loadSource(
-                    clip: clip, mediaType: .video, resolveURL: resolveURL,
-                    resolveSourceSize: resolveSourceSize, missingMediaRefs: missingMediaRefs,
-                    renderSize: renderSize
-                ) {
-                case .loaded(let asset, let track): source = (asset, track)
-                case .offline: offlineMediaRefs.insert(clip.mediaRef); continue
-                case .unprocessable: unprocessableMediaRefs.insert(clip.mediaRef); continue
-                }
-                if compTrack == nil {
-                    compTrack = composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid)
-                }
-                guard let track = compTrack else { continue }
-                if let natSize = try? await source.track.load(.naturalSize),
-                   natSize.width > 0, natSize.height > 0 {
-                    let pt = (try? await source.track.load(.preferredTransform)) ?? .identity
-                    let box = CGRect(origin: .zero, size: natSize).applying(pt)
-                    clipNaturalSizes[clip.id] = CGSize(width: abs(box.width), height: abs(box.height))
-                    clipTransforms[clip.id] = pt.concatenating(CGAffineTransform(translationX: -box.minX, y: -box.minY))
-                }
-                if await insertClip(clip, sourceAsset: source.asset, sourceTrack: source.track,
-                                    into: track, cursor: &cursor, timescale: timescale) {
-                    inserted.append(clip)
-                    previousEndFrame = clip.endFrame
-                }
-            }
-            if let compTrack {
-                if inserted.isEmpty {
-                    composition.removeTrack(compTrack)
-                } else {
-                    trackMappings.append(TrackMapping(
-                        compositionTrack: compTrack,
-                        kind: .nested(clips: inserted, carrier: carrier, parentTrackIndex: parentTrackIndex),
-                        naturalSize: renderSize,
-                        endTime: cursor,
-                        isVideo: true
-                    ))
-                }
-            }
+            try await insertVideoLane(clips: childClips, parentTrackIndex: parentTrackIndex,
+                                      nestCarrier: carrier, depth: depth + 1, ctx: ctx)
         }
     }
 
-    /// Child audio inserts per child track; static volumes fold, top carrier envelope multiplies at mix.
+    /// Static volumes fold down the chain; the top carrier's envelope multiplies at mix time.
     private static func expandNestAudio(
-        carrier: Clip,
-        topCarrier: Clip,
-        volumeScale: Double,
-        parentTrackIndex: Int,
-        depth: Int,
-        composition: AVMutableComposition,
-        timescale: CMTimeScale,
-        renderSize: CGSize,
-        resolveTimeline: @Sendable (String) -> Timeline?,
-        resolveURL: @Sendable (String) -> URL?,
-        resolveSourceSize: @Sendable (String) -> CGSize?,
-        missingMediaRefs: Set<String>,
-        trackMappings: inout [TrackMapping],
-        offlineMediaRefs: inout Set<String>,
-        unprocessableMediaRefs: inout Set<String>
+        carrier: Clip, topCarrier: Clip, volumeScale: Double,
+        parentTrackIndex: Int, depth: Int, ctx: BuildContext
     ) async throws {
         guard depth < NestFlattener.maxDepth else {
             Log.preview.warning("nest depth limit reached; skipping \(carrier.mediaRef.prefix(8))")
             return
         }
-        guard let child = resolveTimeline(carrier.mediaRef) else {
-            offlineMediaRefs.insert(carrier.mediaRef)
+        guard let child = ctx.resolveTimeline(carrier.mediaRef) else {
+            ctx.offlineMediaRefs.insert(carrier.mediaRef)
             return
         }
         let flat = NestFlattener.flatten(carrier: carrier, child: child, visual: false)
         for trackClips in flat.audioTracks {
-            // Clips within a child track never overlap: share one composition track.
-            var sharedTrack: AVMutableCompositionTrack?
-            var sharedCursor = CMTime.zero
-            var sharedClips: [Clip] = []
-            var previousEnd = Int.min
-            for var clip in trackClips {
-                guard clip.durationFrames > 0, clip.startFrame >= previousEnd else { continue }
-                previousEnd = clip.endFrame
-                if clip.sourceClipType == .sequence {
-                    try await expandNestAudio(
-                        carrier: clip, topCarrier: topCarrier, volumeScale: volumeScale * clip.volume,
-                        parentTrackIndex: parentTrackIndex, depth: depth + 1,
-                        composition: composition, timescale: timescale, renderSize: renderSize,
-                        resolveTimeline: resolveTimeline, resolveURL: resolveURL,
-                        resolveSourceSize: resolveSourceSize, missingMediaRefs: missingMediaRefs,
-                        trackMappings: &trackMappings, offlineMediaRefs: &offlineMediaRefs,
-                        unprocessableMediaRefs: &unprocessableMediaRefs
-                    )
-                    continue
-                }
-                clip.volume *= volumeScale
-                let source: (asset: AVURLAsset, track: AVAssetTrack)
-                switch try await loadSource(
-                    clip: clip, mediaType: .audio, resolveURL: resolveURL,
-                    resolveSourceSize: resolveSourceSize, missingMediaRefs: missingMediaRefs,
-                    renderSize: renderSize
-                ) {
-                case .loaded(let asset, let track): source = (asset, track)
-                case .offline: offlineMediaRefs.insert(clip.mediaRef); continue
-                case .unprocessable: unprocessableMediaRefs.insert(clip.mediaRef); continue
-                }
-
-                if sharedTrack == nil {
-                    sharedTrack = composition.addMutableTrack(
-                        withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid)
-                }
-                guard let compTrack = sharedTrack else { continue }
-                if await insertClip(clip, sourceAsset: source.asset, sourceTrack: source.track,
-                                    into: compTrack, cursor: &sharedCursor, timescale: timescale) {
-                    sharedClips.append(clip)
-                }
-            }
-            if let sharedTrack {
-                if sharedClips.isEmpty {
-                    composition.removeTrack(sharedTrack)
-                } else {
-                    trackMappings.append(TrackMapping(
-                        compositionTrack: sharedTrack,
-                        kind: .nested(clips: sharedClips, carrier: topCarrier, parentTrackIndex: parentTrackIndex),
-                        naturalSize: .zero,
-                        endTime: .zero,
-                        isVideo: false
-                    ))
-                }
-            }
+            try await insertAudioLane(clips: trackClips, parentTrackIndex: parentTrackIndex,
+                                      nest: (topCarrier, volumeScale), depth: depth + 1, ctx: ctx)
         }
     }
 
@@ -881,7 +754,10 @@ enum CompositionBuilder {
             }
             for kf in carrier.volumeTrack?.keyframes ?? [] {
                 extraOffsets.append(toClipOffset(kf.frame))
-                extraOffsets.append(toClipOffset(kf.frame) - 1)   // hold boundaries
+            }
+            for (a, b) in zip(carrier.volumeTrack?.keyframes ?? [], carrier.volumeTrack?.keyframes.dropFirst() ?? [])
+            where a.interpolationOut == .hold {
+                extraOffsets.append(toClipOffset(b.frame) - 1)
             }
             extraOffsets = extraOffsets.filter { $0 > 0 && $0 < clip.durationFrames }
         }

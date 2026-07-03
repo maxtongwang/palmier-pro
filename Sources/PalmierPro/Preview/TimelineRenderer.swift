@@ -14,7 +14,7 @@ enum TimelineRenderer {
     static func render(
         timeline: Timeline,
         resolver: MediaResolver,
-        resolveTimeline: @Sendable (String) -> Timeline? = { _ in nil },
+        resolveTimeline: @escaping @Sendable (String) -> Timeline? = { _ in nil },
         missingMediaRefs: Set<String> = [],
         startFrame: Int,
         frameCount: Int,

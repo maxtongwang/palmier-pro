@@ -32,7 +32,7 @@ final class ExportService {
     func export(
         timeline: Timeline,
         resolver: MediaResolver,
-        resolveTimeline: @Sendable (String) -> Timeline? = { _ in nil },
+        resolveTimeline: @escaping @Sendable (String) -> Timeline? = { _ in nil },
         format: ExportFormat,
         resolution: ExportResolution,
         fcpxmlVersion: FCPXMLVersion = .default,
@@ -226,7 +226,7 @@ final class ExportService {
     private func makeExportSession(
         timeline: Timeline,
         resolver: MediaResolver,
-        resolveTimeline: @Sendable (String) -> Timeline? = { _ in nil },
+        resolveTimeline: @escaping @Sendable (String) -> Timeline? = { _ in nil },
         format: ExportFormat,
         resolution: ExportResolution,
         missingMediaRefs: Set<String>
