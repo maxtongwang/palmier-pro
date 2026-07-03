@@ -79,14 +79,14 @@ extension EditorViewModel {
         let timeline = self.timeline
         let resolver = mediaResolver
         let missingMediaRefs = self.missingMediaRefs
-        let timelinesById = Dictionary(uniqueKeysWithValues: timelines.map { ($0.id, $0) })
+        let resolveTimeline = timelineResolver()
 
         Task { @MainActor [weak self] in
             do {
                 let tempURL = try await TimelineRenderer.render(
                     timeline: timeline,
                     resolver: resolver,
-                    resolveTimeline: { timelinesById[$0] },
+                    resolveTimeline: resolveTimeline,
                     missingMediaRefs: missingMediaRefs,
                     startFrame: startFrame,
                     frameCount: frameCount,

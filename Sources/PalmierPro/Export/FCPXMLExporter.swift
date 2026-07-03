@@ -185,23 +185,15 @@ enum FCPXMLExporter {
             return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE fcpxml>\n" + renderFCPXML(root, indent: 0)
         }
 
-        /// Breadth-first over reachable child timelines; unresolvable or empty children stay
-        /// out of `nestIndex`, so their carriers are dropped by `isEmittable`.
+        /// Unresolvable or empty children stay out of `nestIndex`, so `isEmittable` drops their carriers.
         private func collectNests() {
-            var queue = [(t: timeline, depth: 0)]
-            var i = 0
-            while i < queue.count {
-                let (t, depth) = queue[i]
-                i += 1
-                guard depth < NestFlattener.maxDepth else { continue }
-                for clip in t.tracks.flatMap(\.clips) where clip.sourceClipType == .sequence {
-                    guard nestIndex[clip.mediaRef] == nil,
-                          let child = resolveTimeline(clip.mediaRef), child.totalFrames > 0 else { continue }
-                    let mediaId = "nest\(nests.count + 1)"
-                    nestIndex[clip.mediaRef] = mediaId
-                    nests.append((mediaId, child))
-                    queue.append((child, depth + 1))
-                }
+            let reachable = timeline.reachableTimelines(
+                resolve: resolveTimeline, maxDepth: NestFlattener.maxDepth, include: { $0.totalFrames > 0 }
+            )
+            for child in reachable {
+                let mediaId = "nest\(nests.count + 1)"
+                nestIndex[child.id] = mediaId
+                nests.append((mediaId, child))
             }
         }
 

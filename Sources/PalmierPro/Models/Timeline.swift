@@ -42,6 +42,34 @@ struct Timeline: Codable, Sendable, Equatable, Identifiable {
         return ids
     }
 
+    var hasAudioClips: Bool {
+        tracks.contains { $0.type == .audio && !$0.clips.isEmpty }
+    }
+
+    /// Reachable nested timelines, breadth-first, deduped, excluding self and filtered by `include`.
+    func reachableTimelines(
+        resolve: (String) -> Timeline?,
+        maxDepth: Int = Int.max,
+        include: (Timeline) -> Bool = { _ in true }
+    ) -> [Timeline] {
+        var found: [Timeline] = []
+        var seen: Set<String> = [id]
+        var queue: [(t: Timeline, depth: Int)] = [(self, 0)]
+        var i = 0
+        while i < queue.count {
+            let (t, depth) = queue[i]
+            i += 1
+            guard depth < maxDepth else { continue }
+            for clip in t.tracks.flatMap(\.clips) where clip.sourceClipType == .sequence {
+                guard seen.insert(clip.mediaRef).inserted,
+                      let child = resolve(clip.mediaRef), include(child) else { continue }
+                found.append(child)
+                queue.append((child, depth + 1))
+            }
+        }
+        return found
+    }
+
     private enum CodingKeys: String, CodingKey {
         case id, name, fps, width, height, settingsConfigured, folderId, tracks, viewState
     }
@@ -290,6 +318,20 @@ struct Clip: Codable, Sendable, Equatable, Identifiable {
 enum FadeEdge { case left, right }
 
 extension Clip {
+    /// Fresh clip id; link/caption group ids remapped consistently via `groups`.
+    mutating func freshenIds(groups: inout [String: String]) {
+        func remap(_ old: String?) -> String? {
+            guard let old else { return nil }
+            if let new = groups[old] { return new }
+            let new = UUID().uuidString
+            groups[old] = new
+            return new
+        }
+        id = UUID().uuidString
+        linkGroupId = remap(linkGroupId)
+        captionGroupId = remap(captionGroupId)
+    }
+
     /// Drops volume keyframes outside `durationFrames`. Kept for callers that only touch volume.
     mutating func clampVolumeKfsToDuration() {
         volumeTrack = clampedKeyframeTrack(volumeTrack)

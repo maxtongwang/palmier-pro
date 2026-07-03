@@ -80,7 +80,7 @@ extension ToolExecutor {
         let resolver = editor.mediaResolver
         let missingMediaRefs = editor.missingMediaRefs
         let name = outputURL.lastPathComponent
-        let timelinesById = Dictionary(uniqueKeysWithValues: editor.timelines.map { ($0.id, $0) })
+        let resolveTimeline = editor.timelineResolver()
 
         Task { @MainActor in
             defer { ExportCoordinator.endExport() }
@@ -88,7 +88,7 @@ extension ToolExecutor {
             await service.export(
                 timeline: timeline,
                 resolver: resolver,
-                resolveTimeline: { timelinesById[$0] },
+                resolveTimeline: resolveTimeline,
                 format: format,
                 resolution: resolution,
                 missingMediaRefs: missingMediaRefs,
@@ -132,10 +132,9 @@ extension ToolExecutor {
             }
         }
         do {
-            let timelinesById = Dictionary(uniqueKeysWithValues: editor.timelines.map { ($0.id, $0) })
             try await XMLExporter.export(
                 timeline: timeline, resolver: editor.mediaResolver,
-                resolveTimeline: { timelinesById[$0] }, outputURL: outputURL
+                resolveTimeline: editor.timelineResolver(), outputURL: outputURL
             )
         } catch {
             throw ToolError("export_project: XML export failed: \(error.localizedDescription)")
@@ -143,14 +142,7 @@ extension ToolExecutor {
         guard FileManager.default.fileExists(atPath: outputURL.path) else {
             throw ToolError("export_project: XML export failed")
         }
-        // Nests export as nested sequences; only unresolvable/empty children drop.
-        let droppedNests = timeline.tracks.flatMap(\.clips).count {
-            $0.sourceClipType == .sequence && $0.mediaType != .audio
-                && (editor.timeline(for: $0.mediaRef)?.totalFrames ?? 0) == 0
-        }
-        let warnings: [String] = droppedNests > 0
-            ? ["\(droppedNests) nested timeline clip(s) were skipped — their timelines are empty or missing."]
-            : []
+        let warnings = nestExportWarnings(editor, timeline: timeline)
         return try jsonResult([
             "status": "exported",
             "mode": ExportProjectMode.xml.rawValue,
@@ -174,10 +166,9 @@ extension ToolExecutor {
             }
         }
         do {
-            let timelinesById = Dictionary(uniqueKeysWithValues: editor.timelines.map { ($0.id, $0) })
             try await FCPXMLExporter.export(
                 timeline: timeline, resolver: editor.mediaResolver,
-                resolveTimeline: { timelinesById[$0] }, target: target, outputURL: outputURL
+                resolveTimeline: editor.timelineResolver(), target: target, outputURL: outputURL
             )
         } catch {
             throw ToolError("export_project: FCPXML export failed: \(error.localizedDescription)")
@@ -185,14 +176,7 @@ extension ToolExecutor {
         guard FileManager.default.fileExists(atPath: outputURL.path) else {
             throw ToolError("export_project: FCPXML export failed")
         }
-        // Nests export as compound clips; only unresolvable/empty children drop.
-        let droppedNests = timeline.tracks.flatMap(\.clips).count {
-            $0.sourceClipType == .sequence && ($0.mediaType != .audio)
-                && (editor.timeline(for: $0.mediaRef)?.totalFrames ?? 0) == 0
-        }
-        let warnings: [String] = droppedNests > 0
-            ? ["\(droppedNests) nested timeline clip(s) were skipped — their timelines are empty or missing."]
-            : []
+        let warnings = nestExportWarnings(editor, timeline: timeline)
         return try jsonResult([
             "status": "exported",
             "mode": ExportProjectMode.fcpxml.rawValue,
@@ -205,6 +189,15 @@ extension ToolExecutor {
             "fps": timeline.fps,
             "warnings": warnings,
         ])
+    }
+
+    private func nestExportWarnings(_ editor: EditorViewModel, timeline: Timeline) -> [String] {
+        let dropped = timeline.tracks.flatMap(\.clips).count {
+            $0.sourceClipType == .sequence && $0.mediaType != .audio
+                && (editor.timeline(for: $0.mediaRef)?.totalFrames ?? 0) == 0
+        }
+        guard dropped > 0 else { return [] }
+        return ["\(dropped) nested timeline clip(s) were skipped — their timelines are empty or missing."]
     }
 
     private func exportPalmier(_ editor: EditorViewModel, outputURL: URL) async throws -> ToolResult {

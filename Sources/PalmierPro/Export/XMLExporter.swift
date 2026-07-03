@@ -62,19 +62,9 @@ enum XMLExporter {
         timeline: Timeline, resolver: MediaResolver, resolveTimeline: (String) -> Timeline?
     ) async -> [String: SourceTimecode] {
         var mediaRefs: Set<String> = []
-        var queue = [timeline]
-        var visited: Set<String> = []
-        var i = 0
-        while i < queue.count {
-            let t = queue[i]
-            i += 1
-            guard visited.insert(t.id).inserted else { continue }
-            for clip in t.tracks.flatMap(\.clips) {
-                if clip.sourceClipType == .sequence {
-                    if let child = resolveTimeline(clip.mediaRef) { queue.append(child) }
-                } else {
-                    mediaRefs.insert(clip.mediaRef)
-                }
+        for t in [timeline] + timeline.reachableTimelines(resolve: resolveTimeline) {
+            for clip in t.tracks.flatMap(\.clips) where clip.sourceClipType != .sequence {
+                mediaRefs.insert(clip.mediaRef)
             }
         }
         return await SourceTimecodeReader.cache(mediaRefs: mediaRefs, urls: resolver.expectedURLMap())

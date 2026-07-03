@@ -176,11 +176,8 @@ final class ToolExecutor {
         guard let child = editor.timeline(for: id) else {
             throw ToolError("\(path): media asset or timeline not found: \(id)")
         }
-        guard child.totalFrames > 0 else {
-            throw ToolError("\(path): timeline \"\(child.name)\" is empty — add clips to it before nesting it.")
-        }
-        guard !editor.wouldCreateNestCycle(nesting: child.id, into: editor.activeTimelineId) else {
-            throw ToolError("\(path): can't nest \"\(child.name)\" here — it would contain itself.")
+        if let reason = editor.nestBlockReason(childId: id) {
+            throw ToolError("\(path): \(reason)")
         }
         let stand = MediaAsset(
             id: child.id,
@@ -191,7 +188,7 @@ final class ToolExecutor {
         )
         stand.sourceWidth = child.width
         stand.sourceHeight = child.height
-        stand.hasAudio = child.tracks.contains { $0.type == .audio && !$0.clips.isEmpty }
+        stand.hasAudio = child.hasAudioClips
         return stand
     }
 

@@ -1,7 +1,6 @@
 import SwiftUI
 
-/// Shared chrome for grid tiles: 16:9 artwork, selection border, name row with
-/// inline rename, single/double-click, context menu.
+/// Shared grid-tile chrome: artwork, selection border, name row with rename, clicks, context menu.
 struct MediaTileScaffold<Artwork: View, MenuItems: View>: View {
     let name: String
     let isSelected: Bool
@@ -66,7 +65,7 @@ struct MediaTileScaffold<Artwork: View, MenuItems: View>: View {
     }
 
     private var borderColor: Color {
-        if isDropHover { return AppTheme.Accent.primary.opacity(0.8) }
+        if isDropHover { return AppTheme.Accent.primary.opacity(AppTheme.Opacity.prominent) }
         if isSelected { return AppTheme.Accent.primary }
         return Color.clear
     }

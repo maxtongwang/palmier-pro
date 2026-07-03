@@ -143,7 +143,7 @@ final class VideoEngine {
                 return (asset.id, CGSize(width: w, height: h))
             }
         )
-        let timelinesById = Dictionary(uniqueKeysWithValues: editor.timelines.map { ($0.id, $0) })
+        let resolveTimeline = editor.timelineResolver()
 
         rebuildTask = Task {
             let result: CompositionResult
@@ -152,7 +152,7 @@ final class VideoEngine {
                     timeline: editor.timeline,
                     resolveURL: { mediaURLs[$0] },
                     resolveSourceSize: { assetSizes[$0] },
-                    resolveTimeline: { timelinesById[$0] },
+                    resolveTimeline: resolveTimeline,
                     missingMediaRefs: missingMediaRefs,
                     renderSize: CGSize(width: editor.timeline.width, height: editor.timeline.height)
                 )
@@ -171,7 +171,7 @@ final class VideoEngine {
             clipNaturalSizes = result.clipNaturalSizes
             clipTransforms = result.clipTransforms
             compositionDuration = result.composition.duration
-            resolveTimelineSnapshot = { timelinesById[$0] }
+            resolveTimelineSnapshot = resolveTimeline
             editor.offlineMediaRefs = result.offlineMediaRefs
             editor.unprocessableMediaRefs = result.unprocessableMediaRefs
 
