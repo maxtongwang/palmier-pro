@@ -38,30 +38,17 @@ private struct TimelineTabBarContent: View, Equatable {
     var body: some View {
         HStack(spacing: AppTheme.Spacing.xs) {
             allTimelinesMenu
-            ScrollViewReader { proxy in
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: AppTheme.Spacing.md) {
-                        ForEach(tabs) { tab in
-                            tabItem(tab).id(tab.id)
-                        }
-                        addButton
-                    }
-                    .padding(.horizontal, AppTheme.Spacing.sm)
-                }
-                .mouseWheelScrollsHorizontally()
-                .onChange(of: activeId) { _, newId in
-                    withAnimation(.easeOut(duration: AppTheme.Anim.transition)) {
-                        proxy.scrollTo(newId, anchor: .center)
-                    }
-                }
-                .onChange(of: renameRequest) { _, id in
-                    guard let id else { return }
-                    editor.timelineTabRenameRequest = nil
-                    renamingTabId = id
-                    proxy.scrollTo(id, anchor: .center)
-                }
+            TabStrip(items: tabs, activeId: activeId, scrollRequest: renameRequest) { tab in
+                tabItem(tab)
+            } trailing: {
+                addButton
             }
             .fixedSize(horizontal: false, vertical: true)
+            .onChange(of: renameRequest) { _, id in
+                guard let id else { return }
+                editor.timelineTabRenameRequest = nil
+                renamingTabId = id
+            }
 
             Spacer(minLength: 0)
         }
@@ -109,7 +96,11 @@ private struct TimelineTabBarContent: View, Equatable {
             }
 
             if tabs.count > 1 {
-                closeButton(tab.id)
+                TabCloseButton {
+                    withAnimation(.easeInOut(duration: AppTheme.Anim.transition)) {
+                        editor.closeTimelineTab(tab.id)
+                    }
+                }
             }
         }
         .padding(.horizontal, AppTheme.Spacing.xs)
@@ -167,18 +158,4 @@ private struct TimelineTabBarContent: View, Equatable {
         .help("New timeline")
     }
 
-    private func closeButton(_ id: String) -> some View {
-        Button {
-            withAnimation(.easeInOut(duration: AppTheme.Anim.transition)) {
-                editor.closeTimelineTab(id)
-            }
-        } label: {
-            Image(systemName: "xmark")
-                .font(.system(size: AppTheme.FontSize.micro, weight: AppTheme.FontWeight.bold))
-                .foregroundStyle(AppTheme.Text.tertiaryColor)
-                .frame(width: AppTheme.IconSize.xs, height: AppTheme.IconSize.xs)
-                .hoverHighlight(cornerRadius: AppTheme.Radius.xs)
-        }
-        .buttonStyle(.plain)
-    }
 }
