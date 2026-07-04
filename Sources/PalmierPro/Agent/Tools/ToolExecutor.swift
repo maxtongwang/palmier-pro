@@ -35,7 +35,7 @@ final class ToolExecutor {
         }
 
         guard let editor else { return .error("Editor not available") }
-        let before = editor.timeline
+        let before = editor.timelines
         let result: ToolResult
         let started = ContinuousClock.now
         Log.agent.notice(
@@ -46,8 +46,7 @@ final class ToolExecutor {
         do {
             let resolved = try expandingIdPrefixes(in: args, editor: editor)
             result = try await run(tool, editor, resolved)
-            // Register undo only if the timeline actually changed
-            if tool != .undo, tool != .setActiveTimeline, !result.isError, editor.timeline != before,
+            if tool != .undo, tool != .setActiveTimeline, !result.isError, editor.timelines != before,
                let actionName = editor.undoManager?.undoActionName {
                 agentUndoStack.append(actionName)
             }
@@ -62,7 +61,7 @@ final class ToolExecutor {
         let payload: Telemetry.Payload = [
             "tool": tool.rawValue,
             "durationSeconds": elapsed,
-            "timelineChanged": editor.timeline != before
+            "timelineChanged": editor.timelines != before
         ]
         if result.isError {
             Log.agent.warning(
