@@ -175,7 +175,7 @@ enum XMLExporter {
                 rate(fps),
                 timecodeNode(),
                 el("media", [
-                    el("video", [videoFormatNode()] + videoTrackNodes),
+                    el("video", [videoFormatNode(width: timeline.width, height: timeline.height)] + videoTrackNodes),
                     el("audio", [leaf("numOutputChannels", 2), audioFormatNode(), audioOutputsNode()] + audioTrackNodes),
                 ]),
             ])
@@ -191,10 +191,10 @@ enum XMLExporter {
             ])
         }
 
-        private func videoFormatNode() -> XMLNode {
+        private func videoFormatNode(width: Int, height: Int) -> XMLNode {
             el("format", [el("samplecharacteristics", [
-                leaf("width", seqWidth),
-                leaf("height", seqHeight),
+                leaf("width", width),
+                leaf("height", height),
                 bool("anamorphic", false),
                 leaf("pixelaspectratio", "square"),
                 leaf("fielddominance", "none"),
@@ -514,8 +514,9 @@ enum XMLExporter {
         private func sortEmittable(_ track: Track) -> [Clip] {
             track.clips
                 .filter { clip in
+                    // A frozen carrier trimmed past the child's current length would emit out < in.
                     clip.sourceClipType == .sequence
-                        ? (resolveTimeline(clip.mediaRef)?.totalFrames ?? 0) > 0
+                        ? clip.trimStartFrame < (resolveTimeline(clip.mediaRef)?.totalFrames ?? 0)
                         : resolver.resolveURL(for: clip.mediaRef) != nil
                 }
                 .sorted { $0.startFrame < $1.startFrame }
