@@ -208,8 +208,7 @@ extension EditorViewModel {
 
     func applyClipSpeed(clipId: String, newSpeed: Double) {
         guard let loc = findClip(id: clipId) else { return }
-        // Nest playback doesn't support retiming yet.
-        guard timeline.tracks[loc.trackIndex].clips[loc.clipIndex].sourceClipType != .sequence else { return }
+        guard timeline.tracks[loc.trackIndex].clips[loc.clipIndex].supportsRetiming else { return }
         if preDragTimeline == nil {
             preDragTimeline = timeline
         }
@@ -223,7 +222,7 @@ extension EditorViewModel {
         let before: Timeline = preDragTimeline ?? timeline
         for id in ids {
             guard let loc = findClip(id: id) else { continue }
-            guard timeline.tracks[loc.trackIndex].clips[loc.clipIndex].sourceClipType != .sequence else { continue }
+            guard timeline.tracks[loc.trackIndex].clips[loc.clipIndex].supportsRetiming else { continue }
             if timeline.tracks[loc.trackIndex].clips[loc.clipIndex].speed != newSpeed {
                 setClipSpeed(at: loc, newSpeed: newSpeed)
             }

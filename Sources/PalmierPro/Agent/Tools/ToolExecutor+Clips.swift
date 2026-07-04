@@ -584,7 +584,7 @@ extension ToolExecutor {
             if let v = trimStartFrame { clip.trimStartFrame = v; changed.append("trimStartFrame") }
             if let v = trimEndFrame   { clip.trimEndFrame   = v; changed.append("trimEndFrame") }
             if let v = speed {
-                if clip.sourceClipType == .sequence {
+                if !clip.supportsRetiming {
                     changed.append("speed skipped (nested timelines don't support retiming)")
                 } else {
                     if durationFrames == nil, v > 0 {
