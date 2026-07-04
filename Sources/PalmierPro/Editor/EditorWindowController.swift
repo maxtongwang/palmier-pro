@@ -199,7 +199,11 @@ final class EditorWindowController: NSWindowController {
             if let panel = EditorViewModel.FocusedPanel(accessibilityID: v.accessibilityIdentifier()) {
                 editorViewModel.focusedPanel = panel
                 if panel == .media { editorViewModel.selectedClipIds.removeAll() }
-                if panel == .timeline { editorViewModel.selectedMediaAssetIds.removeAll() }
+                if panel == .timeline {
+                    editorViewModel.selectedMediaAssetIds.removeAll()
+                    editorViewModel.selectedTimelineIds.removeAll()
+                    editorViewModel.selectedFolderIds.removeAll()
+                }
                 return
             }
             view = v.superview

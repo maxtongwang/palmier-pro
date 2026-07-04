@@ -158,6 +158,7 @@ extension EditorViewModel {
         let removedViewState = viewState(for: id)
         timelines.remove(at: index)
         liveViewStates.removeValue(forKey: id)
+        selectedTimelineIds.remove(id)
         if let openIndex { openTimelineIds.remove(at: openIndex) }
         undoManager?.registerUndo(withTarget: self) { vm in
             vm.reinsertTimeline(removed, viewState: removedViewState, at: index, openAt: openIndex, reactivate: wasActive)

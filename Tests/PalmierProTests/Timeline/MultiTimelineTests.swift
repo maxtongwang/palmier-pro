@@ -254,6 +254,14 @@ struct MultiTimelineTests {
         }
     }
 
+    @Test func deleteTimelineClearsMediaPanelSelection() {
+        let e = EditorViewModel()
+        let second = e.createTimeline(activate: false)
+        e.selectedTimelineIds = [second]
+        e.deleteTimeline(second)
+        #expect(e.selectedTimelineIds.isEmpty)
+    }
+
     @Test func moveTimelinesToFolderSetsParentAndUndoes() {
         let e = EditorViewModel()
         let undo = UndoManager()
