@@ -2,10 +2,37 @@ import SwiftUI
 
 struct TimelineTabBar: View {
     @Environment(EditorViewModel.self) private var editor
+
+    var body: some View {
+        TimelineTabBarContent(
+            editor: editor,
+            tabs: editor.openTimelineIds.compactMap { id in
+                editor.timeline(for: id).map { TimelineTabInfo(id: $0.id, name: $0.name) }
+            },
+            allTabs: editor.timelines.map { TimelineTabInfo(id: $0.id, name: $0.name) },
+            activeId: editor.activeTimelineId,
+            renameRequest: editor.timelineTabRenameRequest
+        )
+        .equatable()
+    }
+}
+
+private struct TimelineTabInfo: Equatable, Identifiable {
+    let id: String
+    let name: String
+}
+
+private struct TimelineTabBarContent: View, Equatable {
+    let editor: EditorViewModel
+    let tabs: [TimelineTabInfo]
+    let allTabs: [TimelineTabInfo]
+    let activeId: String
+    let renameRequest: String?
     @State private var renamingTabId: String?
 
-    private var openTimelines: [Timeline] {
-        editor.openTimelineIds.compactMap { editor.timeline(for: $0) }
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.tabs == rhs.tabs && lhs.allTabs == rhs.allTabs
+            && lhs.activeId == rhs.activeId && lhs.renameRequest == rhs.renameRequest
     }
 
     var body: some View {
@@ -14,20 +41,20 @@ struct TimelineTabBar: View {
             ScrollViewReader { proxy in
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: AppTheme.Spacing.md) {
-                        ForEach(openTimelines) { timeline in
-                            tabItem(timeline).id(timeline.id)
+                        ForEach(tabs) { tab in
+                            tabItem(tab).id(tab.id)
                         }
                         addButton
                     }
                     .padding(.horizontal, AppTheme.Spacing.sm)
                 }
                 .mouseWheelScrollsHorizontally()
-                .onChange(of: editor.activeTimelineId) { _, newId in
+                .onChange(of: activeId) { _, newId in
                     withAnimation(.easeOut(duration: AppTheme.Anim.transition)) {
                         proxy.scrollTo(newId, anchor: .center)
                     }
                 }
-                .onChange(of: editor.timelineTabRenameRequest) { _, id in
+                .onChange(of: renameRequest) { _, id in
                     guard let id else { return }
                     editor.timelineTabRenameRequest = nil
                     renamingTabId = id
@@ -43,14 +70,14 @@ struct TimelineTabBar: View {
 
     private var allTimelinesMenu: some View {
         Menu {
-            ForEach(editor.timelines) { timeline in
+            ForEach(allTabs) { tab in
                 Button {
-                    editor.activateTimeline(timeline.id)
+                    editor.activateTimeline(tab.id)
                 } label: {
-                    if timeline.id == editor.activeTimelineId {
-                        Label(timeline.name, systemImage: "checkmark")
+                    if tab.id == activeId {
+                        Label(tab.name, systemImage: "checkmark")
                     } else {
-                        Text(timeline.name)
+                        Text(tab.name)
                     }
                 }
             }
@@ -69,20 +96,20 @@ struct TimelineTabBar: View {
         .help("All timelines")
     }
 
-    private func tabItem(_ timeline: Timeline) -> some View {
-        let isActive = timeline.id == editor.activeTimelineId
+    private func tabItem(_ tab: TimelineTabInfo) -> some View {
+        let isActive = tab.id == activeId
         return HStack(spacing: AppTheme.Spacing.xs) {
-            if renamingTabId == timeline.id {
-                renameField(timeline)
+            if renamingTabId == tab.id {
+                renameField(tab)
             } else {
-                Text(timeline.name)
+                Text(tab.name)
                     .font(.system(size: AppTheme.FontSize.xs, weight: isActive ? AppTheme.FontWeight.semibold : AppTheme.FontWeight.medium))
                     .foregroundStyle(isActive ? AppTheme.Text.primaryColor : AppTheme.Text.secondaryColor)
                     .lineLimit(1)
             }
 
-            if editor.openTimelineIds.count > 1 {
-                closeButton(timeline.id)
+            if tabs.count > 1 {
+                closeButton(tab.id)
             }
         }
         .padding(.horizontal, AppTheme.Spacing.xs)
@@ -95,39 +122,35 @@ struct TimelineTabBar: View {
         }
         .fixedSize()
         .hoverHighlight(cornerRadius: AppTheme.Radius.sm)
-        .gesture(TapGesture(count: 2).onEnded { beginRename(timeline) })
-        .simultaneousGesture(TapGesture().onEnded { editor.activateTimeline(timeline.id) })
+        .gesture(TapGesture(count: 2).onEnded { renamingTabId = tab.id })
+        .simultaneousGesture(TapGesture().onEnded { editor.activateTimeline(tab.id) })
         .contextMenu {
-            Button("Rename") { beginRename(timeline) }
-            Button("Duplicate") { editor.duplicateTimeline(timeline.id) }
+            Button("Rename") { renamingTabId = tab.id }
+            Button("Duplicate") { editor.duplicateTimeline(tab.id) }
             Divider()
-            Button("Close Tab") { editor.closeTimelineTab(timeline.id) }
-                .disabled(editor.openTimelineIds.count <= 1)
-            Button("Close Other Tabs") { editor.closeOtherTimelineTabs(keeping: timeline.id) }
-                .disabled(editor.openTimelineIds.count <= 1)
+            Button("Close Tab") { editor.closeTimelineTab(tab.id) }
+                .disabled(tabs.count <= 1)
+            Button("Close Other Tabs") { editor.closeOtherTimelineTabs(keeping: tab.id) }
+                .disabled(tabs.count <= 1)
             Divider()
-            Button("Delete Timeline", role: .destructive) { editor.deleteTimeline(timeline.id) }
-                .disabled(editor.timelines.count <= 1)
+            Button("Delete Timeline", role: .destructive) { editor.deleteTimeline(tab.id) }
+                .disabled(allTabs.count <= 1)
         }
         .animation(.easeOut(duration: AppTheme.Anim.hover), value: isActive)
     }
 
-    private func renameField(_ timeline: Timeline) -> some View {
+    private func renameField(_ tab: TimelineTabInfo) -> some View {
         InlineRenameField(
-            originalName: timeline.name,
+            originalName: tab.name,
             font: .system(size: AppTheme.FontSize.xs, weight: AppTheme.FontWeight.semibold),
             onCommit: { name in
-                editor.renameTimeline(timeline.id, to: name)
+                editor.renameTimeline(tab.id, to: name)
                 renamingTabId = nil
             },
             onCancel: { renamingTabId = nil }
         )
         .foregroundStyle(AppTheme.Text.primaryColor)
         .frame(width: AppTheme.ComponentSize.timelineTabRenameWidth)
-    }
-
-    private func beginRename(_ timeline: Timeline) {
-        renamingTabId = timeline.id
     }
 
     private var addButton: some View {
@@ -159,4 +182,3 @@ struct TimelineTabBar: View {
         .buttonStyle(.plain)
     }
 }
-
