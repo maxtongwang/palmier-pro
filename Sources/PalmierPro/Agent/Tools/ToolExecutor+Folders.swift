@@ -99,7 +99,8 @@ extension ToolExecutor {
     }
 
     func deleteMedia(_ editor: EditorViewModel, _ args: [String: Any]) throws -> ToolResult {
-        let assetIds = args.stringArray("assetIds")
+        var seen: Set<String> = []
+        let assetIds = args.stringArray("assetIds").filter { seen.insert($0).inserted }
         guard !assetIds.isEmpty else { throw ToolError("assetIds is required") }
         let timelineIds = assetIds.filter { id in editor.timelines.contains { $0.id == id } }
         for id in assetIds where !timelineIds.contains(id) {
