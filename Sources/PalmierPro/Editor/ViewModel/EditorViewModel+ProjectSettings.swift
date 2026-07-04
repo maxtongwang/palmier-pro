@@ -98,10 +98,11 @@ extension EditorViewModel {
         }
 
         let timelineIsEmpty = timeline.tracks.allSatisfy { $0.clips.isEmpty }
+        let canAdoptFPS = adoptFPS && timelines.allSatisfy { $0.tracks.allSatisfy { $0.clips.isEmpty } }
 
         if !timeline.settingsConfigured {
             // First clip ever — auto-detect settings silently
-            let fps = adoptFPS ? (firstVideo.sourceFPS.flatMap { Int($0.rounded()) } ?? timeline.fps) : timeline.fps
+            let fps = canAdoptFPS ? (firstVideo.sourceFPS.flatMap { Int($0.rounded()) } ?? timeline.fps) : timeline.fps
             let width = firstVideo.sourceWidth ?? timeline.width
             let height = firstVideo.sourceHeight ?? timeline.height
             applyTimelineSettings(fps: fps, width: width, height: height)
@@ -117,13 +118,13 @@ extension EditorViewModel {
         let clipWidth = firstVideo.sourceWidth
         let clipHeight = firstVideo.sourceHeight
 
-        let fpsMismatch = adoptFPS && clipFPS != nil && clipFPS != timeline.fps
+        let fpsMismatch = canAdoptFPS && clipFPS != nil && clipFPS != timeline.fps
         let resMismatch = (clipWidth != nil && clipWidth != timeline.width) ||
                           (clipHeight != nil && clipHeight != timeline.height)
 
         if fpsMismatch || resMismatch {
             return .mismatch(
-                clipFPS: adoptFPS ? (clipFPS ?? timeline.fps) : timeline.fps,
+                clipFPS: canAdoptFPS ? (clipFPS ?? timeline.fps) : timeline.fps,
                 clipWidth: clipWidth ?? timeline.width,
                 clipHeight: clipHeight ?? timeline.height
             )

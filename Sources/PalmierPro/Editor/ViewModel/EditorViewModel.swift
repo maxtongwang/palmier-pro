@@ -506,8 +506,8 @@ final class EditorViewModel {
     }
 
     func fitTransform(for clip: Clip) -> Transform {
-        guard let asset = mediaAssets.first(where: { $0.id == clip.mediaRef }) else { return Transform() }
-        return fitTransform(for: asset)
+        guard let dims = sourceDimensions(for: clip) else { return Transform() }
+        return fitTransform(sourceWidth: dims.width, sourceHeight: dims.height)
     }
 
     func fitTransform(for asset: MediaAsset, canvasWidth: Int, canvasHeight: Int) -> Transform {
