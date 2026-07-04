@@ -41,15 +41,17 @@ extension EditorViewModel {
             for ti in timeline.tracks.indices {
                 for ci in timeline.tracks[ti].clips.indices {
                     var clip = timeline.tracks[ti].clips[ci]
-                    guard let asset = mediaAssets.first(where: { $0.id == clip.mediaRef }),
-                          let oldAspect = mediaCanvasAspect(for: asset, canvasWidth: prevWidth, canvasHeight: prevHeight),
-                          let newAspect = mediaCanvasAspect(for: asset, canvasWidth: width, canvasHeight: height) else { continue }
+                    guard let dims = sourceDimensions(for: clip),
+                          prevWidth > 0, prevHeight > 0, width > 0, height > 0 else { continue }
+                    let sourceAspect = Double(dims.width) / Double(dims.height)
+                    let oldAspect = sourceAspect / (Double(prevWidth) / Double(prevHeight))
+                    let newAspect = sourceAspect / (Double(width) / Double(height))
 
                     let scaleAnimated = clip.scaleTrack?.isActive ?? false
-                    let oldFit = fitTransform(for: asset, canvasWidth: prevWidth, canvasHeight: prevHeight)
+                    let oldFit = fitTransform(sourceWidth: dims.width, sourceHeight: dims.height, canvasWidth: prevWidth, canvasHeight: prevHeight)
                     if !scaleAnimated,
                        transformScale(clip.transform, matches: oldFit) {
-                        let newFit = fitTransform(for: asset, canvasWidth: width, canvasHeight: height)
+                        let newFit = fitTransform(sourceWidth: dims.width, sourceHeight: dims.height, canvasWidth: width, canvasHeight: height)
                         clip.transform.width = newFit.width
                         clip.transform.height = newFit.height
                     } else {
