@@ -250,12 +250,20 @@ struct ToolExecutorReadOnlyTests {
         #expect(track?["hidden"] == nil)
         #expect(track?["syncLocked"] == nil)
         #expect(track?["label"] as? String == "V1")
+        // No tool consumes track ids or UI fields; the index is what tools take.
+        #expect(track?["id"] == nil)
+        #expect(track?["displayHeight"] == nil)
+        #expect(track?["index"] as? Int == 0)
+        #expect(track?["gaps"] == nil)
+        #expect(json?["settingsConfigured"] == nil)
+        #expect(json?["durationSeconds"] as? Double == 1.667)
 
         let clip = (track?["clips"] as? [[String: Any]])?.first
         #expect(clip?["id"] as? String == "c1")
         #expect(clip?["mediaRef"] as? String == "media-1")
         #expect(clip?["startFrame"] as? Int == 0)
         #expect(clip?["durationFrames"] as? Int == 50)
+        #expect(clip?["endFrame"] as? Int == 50)
         for defaulted in [
             "mediaType", "sourceClipType", "speed", "volume", "opacity",
             "trimStartFrame", "trimEndFrame", "fadeInFrames", "fadeOutFrames",
@@ -283,10 +291,14 @@ struct ToolExecutorReadOnlyTests {
         #expect(loose?.count == 1)
         #expect(loose?.first?["id"] as? String == "v1")
 
+        // Default is a summary: no per-clip rows, no caption clip ids.
         let group = Self.firstCaptionGroup(json)
         #expect(group?["captionGroupId"] as? String == "g1")
         #expect(group?["clipCount"] as? Int == 3)
         #expect(group?["frameRange"] as? [Int] == [0, 90])
+        #expect(group?["clips"] == nil)
+        #expect(group?["textPreview"] as? String == "one … three")
+        #expect((group?["clipsNote"] as? String)?.contains("captionDetail") == true)
 
         let shared = group?["shared"] as? [String: Any]
         #expect(shared?["mediaType"] as? String == "text")
@@ -296,7 +308,9 @@ struct ToolExecutorReadOnlyTests {
         #expect(sharedTransform?["width"] == nil)
         #expect(sharedTransform?["height"] == nil)
 
-        let rows = group?["clips"] as? [[Any]]
+        // captionDetail expands to [clipId, startFrame, durationFrames, text] rows.
+        let detail = try await h.runOK("get_timeline", args: ["captionDetail": true]) as? [String: Any]
+        let rows = Self.firstCaptionGroup(detail)?["clips"] as? [[Any]]
         #expect(rows?.count == 3)
         #expect(rows?.first?[0] as? String == "cap-0")
         #expect(rows?.first?[1] as? Int == 0)
@@ -314,7 +328,7 @@ struct ToolExecutorReadOnlyTests {
         ])
         let h = ToolHarness(timeline: timeline)
 
-        let json = try await h.runOK("get_timeline") as? [String: Any]
+        let json = try await h.runOK("get_timeline", args: ["captionDetail": true]) as? [String: Any]
         let group = Self.firstCaptionGroup(json)
         #expect(group?["clipCount"] as? Int == 2)
         #expect((group?["clips"] as? [[Any]])?.count == 2)
@@ -323,6 +337,20 @@ struct ToolExecutorReadOnlyTests {
         #expect(loose?.count == 1)
         #expect(loose?.first?["id"] as? String == "cap-1")
         #expect(loose?.first?["captionGroupId"] as? String == "g1")
+    }
+
+    @Test func getTimelineReportsTrackGaps() async throws {
+        let timeline = Fixtures.timeline(tracks: [
+            Fixtures.videoTrack(clips: [
+                Fixtures.clip(id: "a", start: 30, duration: 30),
+                Fixtures.clip(id: "b", start: 90, duration: 30),
+                Fixtures.clip(id: "c", start: 120, duration: 30),
+            ]),
+        ])
+        let h = ToolHarness(timeline: timeline)
+        let json = try await h.runOK("get_timeline") as? [String: Any]
+        // Internal gap [60, 90) only; leading space shows as clip a's startFrame.
+        #expect(Self.firstTrack(json)?["gaps"] as? [[Int]] == [[60, 90]])
     }
 
     @Test func getTimelineWindowsClipsToRequestedRange() async throws {
@@ -353,14 +381,16 @@ struct ToolExecutorReadOnlyTests {
             Fixtures.videoTrack(clips: clips),
         ]))
 
-        let json = try await h.runOK("get_timeline") as? [String: Any]
+        let json = try await h.runOK("get_timeline", args: ["captionDetail": true]) as? [String: Any]
         let group = Self.firstCaptionGroup(json)
         #expect(group?["clipCount"] as? Int == 250)
         #expect((group?["clips"] as? [[Any]])?.count == 200)
         #expect((group?["clipsNote"] as? String)?.contains("250") == true)
 
         // Windowing pages past the cap.
-        let paged = try await h.runOK("get_timeline", args: ["startFrame": 6000, "endFrame": 7500]) as? [String: Any]
+        let paged = try await h.runOK("get_timeline", args: [
+            "startFrame": 6000, "endFrame": 7500, "captionDetail": true,
+        ]) as? [String: Any]
         let pagedRows = Self.firstCaptionGroup(paged)?["clips"] as? [[Any]]
         #expect(pagedRows?.count == 50)
         #expect(pagedRows?.first?[0] as? String == "cap-200")

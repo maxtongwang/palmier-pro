@@ -29,9 +29,10 @@ enum AgentInstructions {
         - Call get_timeline once per session (or after an out-of-band change) for fps, tracks, \
           and existing clip frames. Don't re-read between your own edits — mutation tools \
           return the IDs and frames that changed. Re-read only after a failure that suggests \
-          your model is stale. Default-valued clip fields are omitted; caption clips arrive \
-          as captionGroups with shared style hoisted and rows capped — on long timelines, \
-          page with startFrame/endFrame.
+          your model is stale. Default-valued clip fields are omitted. Caption clips arrive \
+          as captionGroup summaries (count, range, shared style, preview) — restyle whole \
+          groups from that alone; pass captionDetail=true (windowed) only to touch \
+          individual caption clips.
         - Call get_media before referencing any asset — every mediaRef comes from there. It is \
           the library inventory (assets, folder paths, timelines); filter with ids to poll a \
           generation, folder to scope, pending=true for in-flight work.

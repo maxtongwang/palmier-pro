@@ -8,9 +8,10 @@ extension ToolExecutor {
     private nonisolated static let readVideoFrameMaxDimension: CGFloat = 512
     private nonisolated static let readVideoJPEGQuality: CGFloat = 0.7
 
-    private static let getTimelineAllowedKeys: Set<String> = ["startFrame", "endFrame"]
+    private static let getTimelineAllowedKeys: Set<String> = ["startFrame", "endFrame", "captionDetail"]
     private static let captionRowLimit = 200
     private static let captionRowFormat = ["clipId", "startFrame", "durationFrames", "text"]
+    private static let captionPreviewLimit = 60
 
     func getTimeline(_ editor: EditorViewModel, _ args: [String: Any]) throws -> ToolResult {
         try validateUnknownKeys(args, allowed: Self.getTimelineAllowedKeys, path: "get_timeline")
@@ -23,19 +24,27 @@ extension ToolExecutor {
             }
             window = s..<e
         }
+        let captionDetail = args["captionDetail"] as? Bool ?? false
 
         guard var dict = try? JSONSerialization.jsonObject(
             with: JSONEncoder().encode(editor.timeline)
         ) as? [String: Any] else { throw ToolError("Failed to encode timeline") }
+        dict.removeValue(forKey: "settingsConfigured")
         if var tracks = dict["tracks"] as? [[String: Any]] {
             for i in tracks.indices {
-                tracks[i] = Self.compactTrack(tracks[i], window: window)
+                tracks[i] = Self.compactTrack(tracks[i], window: window, captionDetail: captionDetail)
                 // Report the displayed label (mirrored video numbering), not the stored seed.
                 tracks[i]["label"] = editor.timelineTrackDisplayLabel(at: i)
+                tracks[i]["index"] = i
+                tracks[i].removeValue(forKey: "id")
+                tracks[i].removeValue(forKey: "displayHeight")
+                let gaps = Self.trackGaps(editor.timeline.tracks[i])
+                if !gaps.isEmpty { tracks[i]["gaps"] = gaps }
             }
             dict["tracks"] = tracks
         }
         dict["totalFrames"] = editor.timeline.totalFrames
+        dict["durationSeconds"] = Double(editor.timeline.totalFrames) / Double(max(editor.timeline.fps, 1))
         if let window {
             dict["window"] = [window.lowerBound, min(window.upperBound, editor.timeline.totalFrames)]
         }
@@ -118,7 +127,21 @@ extension ToolExecutor {
         return obj
     }()
 
-    private static func compactTrack(_ track: [String: Any], window: Range<Int>?) -> [String: Any] {
+    /// Internal empty spans between clips; leading/trailing space is readable off the clip frames.
+    private static func trackGaps(_ track: Track) -> [[Int]] {
+        let spans = track.clips
+            .map { [$0.startFrame, $0.startFrame + $0.durationFrames] }
+            .sorted { $0[0] < $1[0] }
+        var gaps: [[Int]] = []
+        var maxEnd: Int?
+        for span in spans {
+            if let m = maxEnd, span[0] > m { gaps.append([m, span[0]]) }
+            maxEnd = max(maxEnd ?? span[1], span[1])
+        }
+        return gaps
+    }
+
+    private static func compactTrack(_ track: [String: Any], window: Range<Int>?, captionDetail: Bool) -> [String: Any] {
         var out = strippingDefaults(track, trackDefaults)
         guard let rawClips = track["clips"] as? [[String: Any]] else { return out }
         let compacted = rawClips.map { compactClip($0) }
@@ -137,9 +160,14 @@ extension ToolExecutor {
 
         var groups: [[String: Any]] = []
         for gid in groupOrder {
-            let (group, deviants) = captionGroup(gid: gid, members: grouped[gid] ?? [], window: window)
+            let (group, deviants) = captionGroup(gid: gid, members: grouped[gid] ?? [], window: window, detail: captionDetail)
             groups.append(group)
             loose.append(contentsOf: deviants)
+        }
+        loose = loose.map { clip in
+            var c = clip
+            c["endFrame"] = intValue(c["startFrame"]) + intValue(c["durationFrames"])
+            return c
         }
         loose.sort { intValue($0["startFrame"]) < intValue($1["startFrame"]) }
 
@@ -178,9 +206,9 @@ extension ToolExecutor {
         return out
     }
 
-    /// Collapses one caption group into shared properties + compact rows.
+    /// Collapses one caption group into shared properties + a summary (default) or compact rows (detail).
     private static func captionGroup(
-        gid: String, members: [[String: Any]], window: Range<Int>?
+        gid: String, members: [[String: Any]], window: Range<Int>?, detail: Bool
     ) -> (group: [String: Any], deviants: [[String: Any]]) {
         let rowKeys: Set<String> = ["id", "startFrame", "durationFrames", "textContent", "captionGroupId"]
         var counts: [String: Int] = [:]
@@ -224,20 +252,35 @@ extension ToolExecutor {
             rows = rows.filter { intValue($0[1]) < window.upperBound && intValue($0[1]) + intValue($0[2]) > window.lowerBound }
         }
         rows.sort { intValue($0[1]) < intValue($1[1]) }
-        let shown = Array(rows.prefix(captionRowLimit))
 
         var group: [String: Any] = [
             "captionGroupId": gid,
             "clipCount": total,
             "frameRange": [frameMin, frameMax],
-            "clipFormat": captionRowFormat,
-            "clips": shown,
         ]
         if !shared.isEmpty { group["shared"] = shared }
+
+        guard detail else {
+            if let first = rows.first?[3] as? String, let last = rows.last?[3] as? String {
+                group["textPreview"] = rows.count == 1
+                    ? truncate(first)
+                    : "\(truncate(first)) … \(truncate(last))"
+            }
+            group["clipsNote"] = "Per-clip rows omitted — re-read with captionDetail:true for \(captionRowFormat) rows; get_transcript has the spoken words."
+            return (group, deviants)
+        }
+
+        let shown = Array(rows.prefix(captionRowLimit))
+        group["clipFormat"] = captionRowFormat
+        group["clips"] = shown
         if shown.count < total {
             group["clipsNote"] = "Showing \(shown.count) of \(total) caption clips. Page with startFrame/endFrame."
         }
         return (group, deviants)
+    }
+
+    private static func truncate(_ text: String) -> String {
+        text.count > captionPreviewLimit ? String(text.prefix(captionPreviewLimit)) + "…" : text
     }
 
     private static func canonicalJSON(_ obj: [String: Any]) -> String {

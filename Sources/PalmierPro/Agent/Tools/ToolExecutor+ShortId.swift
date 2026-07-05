@@ -25,7 +25,6 @@ extension ToolExecutor {
         var ids = Set<String>()
         for timeline in editor.timelines { ids.insert(timeline.id) }
         for track in editor.timeline.tracks {
-            ids.insert(track.id)
             for clip in track.clips {
                 ids.insert(clip.id)
                 if let captionGroupId = clip.captionGroupId { ids.insert(captionGroupId) }
