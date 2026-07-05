@@ -55,26 +55,6 @@ enum VoiceActivity {
         }
     }
 
-    private static func readMono(from url: URL) async throws -> [Float] {
-        var samples: [Float] = []
-        if let duration = try? await AVURLAsset(url: url).load(.duration).seconds, duration.isFinite, duration > 0 {
-            samples.reserveCapacity(Int(duration * Double(SileroVADModel.sampleRate)) + SileroVADModel.chunkSize)
-        }
-        try await AudioTrackReader.read(from: url, outputSettings: [
-            AVFormatIDKey: kAudioFormatLinearPCM,
-            AVSampleRateKey: Double(SileroVADModel.sampleRate),
-            AVNumberOfChannelsKey: 1,
-            AVLinearPCMBitDepthKey: 32,
-            AVLinearPCMIsFloatKey: true,
-            AVLinearPCMIsBigEndianKey: false,
-            AVLinearPCMIsNonInterleaved: true,
-        ]) { buffer in
-            guard let data = buffer.floatChannelData else { return }
-            samples.append(contentsOf: UnsafeBufferPointer(start: data[0], count: Int(buffer.frameLength)))
-        }
-        return samples
-    }
-
     /// Two in flight: one file decodes while the previous one runs inference in the
     /// (serial) model actor, with memory bounded to two decoded files.
     private static let pipelineGate = AsyncSemaphore(value: 2)
@@ -83,7 +63,7 @@ enum VoiceActivity {
         if let cached = cachedAnalysis(for: sourceURL, mediaRef: mediaRef) { return cached }
         try await pipelineGate.wait()
         defer { Task { await pipelineGate.signal() } }
-        let samples = try await readMono(from: sourceURL)
+        let samples = try await AudioTrackReader.readMonoFloats(from: sourceURL, sampleRate: Double(SileroVADModel.sampleRate))
         let analysis = try await modelBox.analyze(samples: samples)
         let outputURL = analysisURL(for: sourceURL, mediaRef: mediaRef)
         removeStaleCaches(for: mediaRef, keeping: outputURL)
