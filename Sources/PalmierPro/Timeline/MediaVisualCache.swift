@@ -84,6 +84,16 @@ final class MediaVisualCache {
         }
     }
 
+    /// Drops all in-memory state after a disk-cache clear so everything regenerates.
+    func resetSessionState() {
+        waveformSamples.removeAll()
+        speakerMasks.removeAll()
+        speech.reset()
+        videoThumbnails.removeAll()
+        imageThumbnails.removeAll()
+        timelineView?.needsDisplay = true
+    }
+
     /// Clears every cached visual for `mediaRef` so relinked media regenerates.
     func invalidate(_ mediaRef: String) {
         waveformSamples.removeValue(forKey: mediaRef)

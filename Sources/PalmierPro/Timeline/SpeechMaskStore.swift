@@ -42,6 +42,13 @@ final class SpeechMaskStore {
         }
     }
 
+    /// Drops all session state so cleared disk caches regenerate.
+    func reset() {
+        speechMasks.removeAll()
+        deadAirMasks.removeAll()
+        failed.removeAll()
+    }
+
     func invalidate(_ mediaRef: String) {
         speechMasks.removeValue(forKey: mediaRef)
         deadAirMasks.removeValue(forKey: mediaRef)

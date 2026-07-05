@@ -1,6 +1,14 @@
 import Foundation
 
 extension EditorViewModel {
+    /// Called after Settings clears disk caches: session memoization must not outlive them.
+    func resetAnalysisSessionState() {
+        denoiseBaked.removeAll()
+        denoiseFailed.removeAll()
+        mediaVisualCache.resetSessionState()
+        enhancePendingDenoises()
+    }
+
     func setDenoise(clipIds: Set<String>, enabled: Bool, amount: Double? = nil, actionName: String) {
         let clamped = amount.map { min(1, max(0, $0)) }
         if enabled {
