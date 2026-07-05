@@ -641,7 +641,7 @@ struct ToolExecutorClipTests {
                 "mediaRef": asset.id,
                 "trackIndex": 0,
                 "startFrame": 0,
-                "durationFrames": 60,
+                "endFrame": 60,
             ]]
         ])
         #expect(result.isError == false, "\(ToolHarness.textOf(result))")
@@ -659,7 +659,7 @@ struct ToolExecutorClipTests {
                 "mediaRef": asset.id,
                 "trackIndex": 99,
                 "startFrame": 0,
-                "durationFrames": 30,
+                "endFrame": 30,
             ]]
         ])
         #expect(result.isError)
@@ -673,7 +673,7 @@ struct ToolExecutorClipTests {
                 "mediaRef": "no-such-asset",
                 "trackIndex": 0,
                 "startFrame": 0,
-                "durationFrames": 30,
+                "endFrame": 30,
             ]]
         ])
         #expect(result.isError)
@@ -690,7 +690,7 @@ struct ToolExecutorClipTests {
                 "mediaRef": audio.id,
                 "trackIndex": 0,
                 "startFrame": 0,
-                "durationFrames": 30,
+                "endFrame": 30,
             ]]
         ])
         #expect(result.isError)
@@ -704,11 +704,11 @@ struct ToolExecutorClipTests {
                 "mediaRef": asset.id,
                 "trackIndex": 0,
                 "startFrame": 0,
-                "durationFrames": 0,
+                "endFrame": 0,
             ]]
         ])
         #expect(result.isError)
-        #expect(ToolHarness.textOf(result).contains("durationFrames"))
+        #expect(ToolHarness.textOf(result).contains("endFrame"))
     }
 
     @Test func addClipsRejectsEmptyEntries() async throws {
@@ -725,7 +725,7 @@ struct ToolExecutorClipTests {
             "entries": [[
                 "mediaRef": asset.id,
                 "startFrame": 0,
-                "durationFrames": 30,
+                "endFrame": 30,
             ]]
         ])
         #expect(result.isError == false, "\(ToolHarness.textOf(result))")
@@ -741,8 +741,8 @@ struct ToolExecutorClipTests {
         let initialCount = h.editor.timeline.tracks.count
         let result = await h.runRaw("add_clips", args: [
             "entries": [
-                ["mediaRef": a.id, "startFrame": 0, "durationFrames": 30],
-                ["mediaRef": b.id, "startFrame": 60, "durationFrames": 30],
+                ["mediaRef": a.id, "startFrame": 0, "endFrame": 30],
+                ["mediaRef": b.id, "startFrame": 60, "endFrame": 90],
             ]
         ])
         #expect(result.isError == false, "\(ToolHarness.textOf(result))")
@@ -760,8 +760,8 @@ struct ToolExecutorClipTests {
         let initial = h.editor.timeline.tracks.count
         let result = await h.runRaw("add_clips", args: [
             "entries": [
-                ["mediaRef": video.id, "startFrame": 0, "durationFrames": 30],
-                ["mediaRef": audio.id, "startFrame": 0, "durationFrames": 30],
+                ["mediaRef": video.id, "startFrame": 0, "endFrame": 30],
+                ["mediaRef": audio.id, "startFrame": 0, "endFrame": 30],
             ]
         ])
         #expect(result.isError == false, "\(ToolHarness.textOf(result))")
@@ -786,9 +786,9 @@ struct ToolExecutorClipTests {
         let audio2 = h.addAsset(type: .audio)
         let result = await h.runRaw("add_clips", args: [
             "entries": [
-                ["mediaRef": audio1.id, "startFrame": 0, "durationFrames": 30],
-                ["mediaRef": video.id, "startFrame": 0, "durationFrames": 30],
-                ["mediaRef": audio2.id, "startFrame": 60, "durationFrames": 30],
+                ["mediaRef": audio1.id, "startFrame": 0, "endFrame": 30],
+                ["mediaRef": video.id, "startFrame": 0, "endFrame": 30],
+                ["mediaRef": audio2.id, "startFrame": 60, "endFrame": 90],
             ]
         ])
         #expect(result.isError == false, "\(ToolHarness.textOf(result))")
@@ -812,8 +812,8 @@ struct ToolExecutorClipTests {
         let b = h.addAsset(type: .video)
         let result = await h.runRaw("add_clips", args: [
             "entries": [
-                ["mediaRef": a.id, "trackIndex": 0, "startFrame": 0, "durationFrames": 30],
-                ["mediaRef": b.id, "startFrame": 60, "durationFrames": 30], // omitted trackIndex
+                ["mediaRef": a.id, "trackIndex": 0, "startFrame": 0, "endFrame": 30],
+                ["mediaRef": b.id, "startFrame": 60, "endFrame": 90], // omitted trackIndex
             ]
         ])
         #expect(result.isError)
@@ -827,8 +827,8 @@ struct ToolExecutorClipTests {
         // Two clips so the track survives the implicit pruneEmptyTracks pass.
         _ = await h.runRaw("add_clips", args: [
             "entries": [
-                ["mediaRef": asset.id, "trackIndex": 0, "startFrame": 0, "durationFrames": 30],
-                ["mediaRef": asset.id, "trackIndex": 0, "startFrame": 60, "durationFrames": 30],
+                ["mediaRef": asset.id, "trackIndex": 0, "startFrame": 0, "endFrame": 30],
+                ["mediaRef": asset.id, "trackIndex": 0, "startFrame": 60, "endFrame": 90],
             ]
         ])
         let clipId = h.editor.timeline.tracks[0].clips.sorted { $0.startFrame < $1.startFrame }[0].id
@@ -844,7 +844,7 @@ struct ToolExecutorClipTests {
         // Pinning down this side-effect so anyone changing prune behavior has to update the test.
         let (h, asset) = await setupWithVideoTrack()
         _ = await h.runRaw("add_clips", args: [
-            "entries": [["mediaRef": asset.id, "trackIndex": 0, "startFrame": 0, "durationFrames": 30]]
+            "entries": [["mediaRef": asset.id, "trackIndex": 0, "startFrame": 0, "endFrame": 30]]
         ])
         let clipId = h.editor.timeline.tracks[0].clips[0].id
 
@@ -857,22 +857,24 @@ struct ToolExecutorClipTests {
         // Without this, an LLM agent's trackIndex mental model silently desyncs after a remove.
         let (h, asset) = await setupWithVideoTrack()
         _ = await h.runRaw("add_clips", args: [
-            "entries": [["mediaRef": asset.id, "trackIndex": 0, "startFrame": 0, "durationFrames": 30]]
+            "entries": [["mediaRef": asset.id, "trackIndex": 0, "startFrame": 0, "endFrame": 30]]
         ])
         let clipId = h.editor.timeline.tracks[0].clips[0].id
 
-        let result = await h.runRaw("remove_clips", args: ["clipIds": [clipId]])
-        let message = ToolHarness.textOf(result)
-        #expect(message.contains("Pruned"), "expected prune note, got: \(message)")
-        #expect(message.contains("re-read"), "expected hint to re-read timeline, got: \(message)")
+        let json = try await h.runOK("remove_clips", args: ["clipIds": [clipId]]) as? [String: Any]
+        #expect((json?["removedClipIds"] as? [String])?.count == 1)
+        // The removed id must come back as a short prefix, not a full UUID.
+        #expect(((json?["removedClipIds"] as? [String])?.first?.count ?? 99) < 36)
+        let notes = (json?["notes"] as? [String])?.joined(separator: " ") ?? ""
+        #expect(notes.contains("Track indices shifted"), "expected track-shift note, got: \(notes)")
     }
 
     @Test func removeClipsMessageOmitsPruneNoteWhenNothingPruned() async throws {
         let (h, asset) = await setupWithVideoTrack()
         _ = await h.runRaw("add_clips", args: [
             "entries": [
-                ["mediaRef": asset.id, "trackIndex": 0, "startFrame": 0, "durationFrames": 30],
-                ["mediaRef": asset.id, "trackIndex": 0, "startFrame": 60, "durationFrames": 30],
+                ["mediaRef": asset.id, "trackIndex": 0, "startFrame": 0, "endFrame": 30],
+                ["mediaRef": asset.id, "trackIndex": 0, "startFrame": 60, "endFrame": 90],
             ]
         ])
         let clipId = h.editor.timeline.tracks[0].clips.sorted { $0.startFrame < $1.startFrame }[0].id
@@ -897,7 +899,7 @@ struct ToolExecutorClipTests {
                 "mediaRef": asset.id,
                 "trackIndex": 0,
                 "startFrame": 0,
-                "durationFrames": 60,
+                "endFrame": 60,
             ]]
         ])
         let clipId = h.editor.timeline.tracks[0].clips[0].id
@@ -915,7 +917,7 @@ struct ToolExecutorClipTests {
                 "mediaRef": asset.id,
                 "trackIndex": 0,
                 "startFrame": 0,
-                "durationFrames": 90,
+                "endFrame": 90,
             ]]
         ])
 
@@ -932,18 +934,19 @@ struct ToolExecutorClipTests {
     @Test func splitClipsDedupsDuplicateFrames() async throws {
         let (h, asset) = await setupWithVideoTrack()
         _ = await h.runRaw("add_clips", args: [
-            "entries": [["mediaRef": asset.id, "trackIndex": 0, "startFrame": 0, "durationFrames": 90]]
+            "entries": [["mediaRef": asset.id, "trackIndex": 0, "startFrame": 0, "endFrame": 90]]
         ])
-        let result = await h.runRaw("split_clips", args: ["trackIndex": 0, "frames": [30, 30]])
-        #expect(result.isError == false, "\(ToolHarness.textOf(result))")
+        let json = try await h.runOK("split_clips", args: ["trackIndex": 0, "frames": [30, 30]]) as? [String: Any]
         #expect(h.editor.timeline.tracks[0].clips.count == 2)
-        #expect(ToolHarness.textOf(result).contains("1 point"))
+        // Both halves come back with their resulting frames.
+        let frames = (json?["clips"] as? [[String: Any]])?.compactMap { $0["frames"] as? [Int] }
+        #expect(frames == [[0, 30], [30, 90]])
     }
 
     @Test func splitClipsRejectsSeamFrame() async throws {
         let (h, asset) = await setupWithVideoTrack()
         _ = await h.runRaw("add_clips", args: [
-            "entries": [["mediaRef": asset.id, "trackIndex": 0, "startFrame": 0, "durationFrames": 90]]
+            "entries": [["mediaRef": asset.id, "trackIndex": 0, "startFrame": 0, "endFrame": 90]]
         ])
         _ = await h.runRaw("split_clips", args: ["trackIndex": 0, "frames": [30]])
         // Frame 30 is now a seam between two clips — strictly inside neither.
@@ -955,7 +958,7 @@ struct ToolExecutorClipTests {
     @Test func splitClipsRejectsBothAndNeitherMode() async throws {
         let (h, asset) = await setupWithVideoTrack()
         _ = await h.runRaw("add_clips", args: [
-            "entries": [["mediaRef": asset.id, "trackIndex": 0, "startFrame": 0, "durationFrames": 90]]
+            "entries": [["mediaRef": asset.id, "trackIndex": 0, "startFrame": 0, "endFrame": 90]]
         ])
         let clipId = h.editor.timeline.tracks[0].clips[0].id
 
@@ -971,7 +974,7 @@ struct ToolExecutorClipTests {
     @Test func splitClipsEmptySplitsFallsThroughToTrackMode() async throws {
         let (h, asset) = await setupWithVideoTrack()
         _ = await h.runRaw("add_clips", args: [
-            "entries": [["mediaRef": asset.id, "trackIndex": 0, "startFrame": 0, "durationFrames": 90]]
+            "entries": [["mediaRef": asset.id, "trackIndex": 0, "startFrame": 0, "endFrame": 90]]
         ])
         // Empty splits + valid trackIndex/frames must apply the track cuts, not error out.
         let result = await h.runRaw("split_clips", args: ["splits": [], "trackIndex": 0, "frames": [30]])
@@ -988,7 +991,7 @@ struct ToolExecutorClipTests {
                 "mediaRef": asset.id,
                 "trackIndex": 0,
                 "startFrame": 0,
-                "durationFrames": duration,
+                "endFrame": duration,
             ]]
         ])
         return h.editor.timeline.tracks[0].clips[0].id
@@ -1076,7 +1079,11 @@ struct ToolExecutorClipTests {
         let audioClip = h.editor.timeline.tracks[audioLoc.trackIndex].clips[audioLoc.clipIndex]
         #expect(videoClip.startFrame == 60)
         #expect(audioClip.startFrame == 60, "linked audio should track the video's frame delta")
-        #expect(ToolHarness.textOf(result).contains("linked"))
+        // The moved clip comes back with resulting frames and its folded audio partner.
+        let json = try JSONSerialization.jsonObject(with: Data(ToolHarness.textOf(result).utf8)) as? [String: Any]
+        let clip = (json?["clips"] as? [[String: Any]])?.first
+        #expect(clip?["frames"] as? [Int] == [60, 120])
+        #expect((clip?["audio"] as? [String: Any])?["id"] != nil)
     }
 
     @Test func moveClipsTrackChangeDoesNotMoveLinkedPartner() async throws {
@@ -1127,7 +1134,7 @@ struct ToolExecutorClipTests {
         let id1 = await addedClip(in: h, asset: asset, duration: 30)
         // Place a second clip at a non-overlapping range on the same track.
         _ = await h.runRaw("add_clips", args: [
-            "entries": [["mediaRef": asset.id, "trackIndex": 0, "startFrame": 60, "durationFrames": 30]]
+            "entries": [["mediaRef": asset.id, "trackIndex": 0, "startFrame": 60, "endFrame": 90]]
         ])
         let id2 = h.editor.timeline.tracks[0].clips.first { $0.id != id1 }!.id
         _ = await h.runRaw("set_clip_properties", args: [
@@ -1419,6 +1426,81 @@ struct ToolExecutorClipTests {
         #expect((clip?["crop"] as? [String: Any])?["left"] as? Double == 0.313)
     }
 
+    @Test func addClipsReportsOverwrittenAndTrimmedNeighbors() async throws {
+        let h = ToolHarness()
+        let asset = h.addAsset(type: .video, duration: 10)
+        _ = await h.runRaw("add_clips", args: ["entries": [
+            ["mediaRef": asset.id, "startFrame": 0, "endFrame": 60],
+            ["mediaRef": asset.id, "startFrame": 90, "endFrame": 120],
+        ]])
+        let victim = h.editor.timeline.tracks[0].clips[1].id
+
+        // Lands on [40, 120): trims the first clip's tail, removes the second entirely.
+        let json = try await h.runOK("add_clips", args: ["entries": [
+            ["mediaRef": asset.id, "trackIndex": 0, "startFrame": 40, "endFrame": 120],
+        ]]) as? [String: Any]
+        let frames = (json?["clips"] as? [[String: Any]])?.compactMap { $0["frames"] as? [Int] }
+        #expect(frames == [[0, 40], [40, 120]])
+        #expect((json?["removedClipIds"] as? [String])?.count == 1)
+        #expect(((json?["removedClipIds"] as? [String])?.first).map { victim.hasPrefix($0) } == true)
+    }
+
+    @Test func insertClipsCompressesDownstreamShiftIntoRule() async throws {
+        let h = ToolHarness()
+        let asset = h.addAsset(type: .video, duration: 10)
+        var entries: [[String: Any]] = []
+        for i in 0..<4 {
+            entries.append(["mediaRef": asset.id, "startFrame": i * 30, "endFrame": i * 30 + 30])
+        }
+        _ = await h.runRaw("add_clips", args: ["entries": entries])
+
+        let json = try await h.runOK("insert_clips", args: [
+            "trackIndex": 0, "atFrame": 30,
+            "entries": [["mediaRef": asset.id, "durationFrames": 60]],
+        ]) as? [String: Any]
+        // The inserted clip is enumerated; the three downstream clips compress to one rule.
+        let inserted = (json?["clips"] as? [[String: Any]])?.first
+        #expect(inserted?["frames"] as? [Int] == [30, 90])
+        let shift = (json?["shifted"] as? [[String: Any]])?.first
+        #expect(shift?["by"] as? Int == 60)
+        #expect(shift?["count"] as? Int == 3)
+        #expect(shift?["fromFrame"] as? Int == 30)
+    }
+
+    @Test func addClipsAcceptsSourceSecondsSpan() async throws {
+        let h = ToolHarness()
+        let asset = h.addAsset(type: .video, duration: 10)
+        let json = try await h.runOK("add_clips", args: ["entries": [
+            ["mediaRef": asset.id, "startFrame": 0, "source": [2.0, 5.0]],
+        ]]) as? [String: Any]
+        let clip = (json?["clips"] as? [[String: Any]])?.first
+        // 30fps: seconds [2, 5] → trimStart 60, duration 90.
+        #expect(clip?["frames"] as? [Int] == [0, 90])
+        #expect(clip?["trimStartFrame"] as? Int == 60)
+
+        let mixed = await h.runRaw("add_clips", args: ["entries": [
+            ["mediaRef": asset.id, "startFrame": 0, "source": [2.0, 5.0], "endFrame": 30],
+        ]])
+        #expect(mixed.isError)
+    }
+
+    @Test func setClipPropertiesEchoesResultingValuesAndKeyframeClear() async throws {
+        let (h, clipId) = await setupClipForKeyframes()
+        _ = await h.runRaw("set_keyframes", args: [
+            "clipId": clipId, "property": "volume",
+            "keyframes": [[0, 1.0], [30, 0.0]],
+        ])
+        let json = try await h.runOK("set_clip_properties", args: [
+            "clipIds": [clipId], "volume": 0.5, "speed": 2.0,
+        ]) as? [String: Any]
+        let clip = (json?["clips"] as? [[String: Any]])?.first
+        // Resulting values visible: halved duration from speed, scalar volume, keyframes gone.
+        #expect(clip?["volume"] as? Double == 0.5)
+        #expect(clip?["speed"] as? Double == 2.0)
+        #expect(clip?["keyframes"] == nil)
+        #expect(((json?["notes"] as? [String])?.first ?? "").contains("cleared existing keyframes"))
+    }
+
     @Test func setProjectSettingsReturnsChangedFieldsAsJSON() async throws {
         let h = ToolHarness()
         let json = try await h.runOK("set_project_settings", args: ["fps": 60]) as? [String: Any]
@@ -1453,7 +1535,7 @@ struct ToolExecutorClipTests {
         let h = ToolHarness()
         h.addAsset(id: "av-src", duration: 10, hasAudio: true)
         _ = await h.runRaw("add_clips", args: ["entries": [
-            ["mediaRef": "av-src", "startFrame": 0, "durationFrames": 60],
+            ["mediaRef": "av-src", "startFrame": 0, "endFrame": 60],
         ]])
         let audioClip = h.editor.timeline.tracks.first { $0.type == .audio }?.clips.first
         let audioId = try #require(audioClip?.id)
@@ -1809,15 +1891,13 @@ struct ToolExecutorTextFolderTests {
             "clipId": "c1", "ranges": [[40, 50]],
         ]) as? [String: Any]
         #expect(json?["removedFrames"] as? Int == 10)
-        let clips = (json?["resultingClips"] as? [[String: Any]] ?? [])
-            .sorted { ($0["startFrame"] as! Int) < ($1["startFrame"] as! Int) }
+        let clips = json?["clips"] as? [[String: Any]] ?? []
         #expect(clips.count == 2)
         // Head keeps c1 at [0,40); tail is a new id at [40,90).
-        #expect(clips.first?["clipId"] as? String == "c1")
-        #expect(clips.first?["durationFrames"] as? Int == 40)
-        #expect(clips.last?["startFrame"] as? Int == 40)
-        #expect(clips.last?["durationFrames"] as? Int == 50)
-        #expect(clips.last?["clipId"] as? String != "c1")
+        #expect(clips.first?["id"] as? String == "c1")
+        #expect(clips.first?["frames"] as? [Int] == [0, 40])
+        #expect(clips.last?["frames"] as? [Int] == [40, 90])
+        #expect(clips.last?["id"] as? String != "c1")
     }
 
     // MARK: - get_transcript

@@ -36,6 +36,7 @@ final class ToolExecutor {
 
         guard let editor else { return .error("Editor not available") }
         let before = editor.timelines
+        let idsBefore = currentIdUniverse(editor)
         let result: ToolResult
         let started = ContinuousClock.now
         Log.agent.notice(
@@ -76,8 +77,8 @@ final class ToolExecutor {
                 data: payload
             )
         }
-        // Shorten on the post-run state so newly created ids in summaries are shortened too.
-        return await shorteningIds(in: result, editor: editor)
+        // Shorten on pre ∪ post ids: new ids and just-removed ids both stay short.
+        return await shorteningIds(in: result, editor: editor, alsoKnown: idsBefore)
     }
 
     private func run(_ tool: ToolName, _ editor: EditorViewModel, _ args: [String: Any]) async throws -> ToolResult {
@@ -95,7 +96,7 @@ final class ToolExecutor {
         case .addClips:         return try addClips(editor, args)
         case .insertClips:      return try insertClips(editor, args)
         case .removeClips:      return try removeClips(editor, args)
-        case .removeTracks:     return try removeTracks(editor, args)
+        case .manageTracks:     return try manageTracks(editor, args)
         case .moveClips:        return try moveClips(editor, args)
         case .applyLayout:      return try applyLayout(editor, args)
         case .setClipProperties: return try setClipProperties(editor, args)

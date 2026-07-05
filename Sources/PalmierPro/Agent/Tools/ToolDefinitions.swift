@@ -24,11 +24,11 @@ enum ToolName: String, CaseIterable, Sendable {
     case organizeMedia = "organize_media"
 
     // Clips
+    case manageTracks = "manage_tracks"
     case addClips = "add_clips"
     case insertClips = "insert_clips"
     case moveClips = "move_clips"
     case removeClips = "remove_clips"
-    case removeTracks = "remove_tracks"
     case splitClips = "split_clips"
     case rippleDeleteRanges = "ripple_delete_ranges"
     case setClipProperties = "set_clip_properties"
@@ -79,7 +79,7 @@ enum ToolDefinitions {
                 properties: [
                     "startFrame": ["type": "integer", "description": "Optional. Window start (inclusive); only clips intersecting [startFrame, endFrame) are returned. Tracks report totalClips when the window hides some."],
                     "endFrame": ["type": "integer", "description": "Optional. Window end (exclusive)."],
-                    "captionDetail": ["type": "boolean", "description": "Optional. true expands captionGroups into per-clip [clipId, startFrame, durationFrames, text] rows. Combine with a window; only needed to edit individual caption clips."],
+                    "captionDetail": ["type": "boolean", "description": "Optional. true expands captionGroups into per-clip [clipId, startFrame, endFrame, text] rows. Combine with a window; only needed to edit individual caption clips."],
                 ]
             )
         ),
@@ -176,7 +176,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .searchMedia,
-            description: "Search the media library by content: what's on screen (visual) and what's said (spoken). Visual matching is semantic and on-device — phrase the query like an image caption ('a wide shot of a harbor at sunset'), not keywords; covers videos and stills. Spoken matching layers exact keywords over on-device semantic matching of transcript segments — quote the words said, or paraphrase them; transcripts are created automatically while indexing (and by inspect_media and add_captions), so coverage grows as indexing completes. The two groups rank independently and are never blended. Scores are uncalibrated — use them for ordering only.\n\nHits are source-second ranges (image hits have no time range). To place exactly that moment, multiply by the returned timelineFps and pass as trimStartFrame/trimEndFrame with a matching durationFrames to add_clips.\n\nAn `index` object appears only while it can explain missing results (status: indexing | modelNotInstalled | downloadingModel | preparing | disabled | failed, with indexedAssets vs indexableAssets). When present, moments may be incomplete — report that instead of concluding the footage doesn't exist, and don't poll in a loop. No index key means visual search was complete. Spoken results work regardless.",
+            description: "Search the media library by content: what's on screen (visual) and what's said (spoken). Visual matching is semantic and on-device — phrase the query like an image caption ('a wide shot of a harbor at sunset'), not keywords; covers videos and stills. Spoken matching layers exact keywords over on-device semantic matching of transcript segments — quote the words said, or paraphrase them; transcripts are created automatically while indexing (and by inspect_media and add_captions), so coverage grows as indexing completes. The two groups rank independently and are never blended. Scores are uncalibrated — use them for ordering only.\n\nHits are source-second ranges (image hits have no time range). To place exactly that moment, pass [startSeconds, endSeconds] straight to add_clips as source — no unit conversion.\n\nAn `index` object appears only while it can explain missing results (status: indexing | modelNotInstalled | downloadingModel | preparing | disabled | failed, with indexedAssets vs indexableAssets). When present, moments may be incomplete — report that instead of concluding the footage doesn't exist, and don't poll in a loop. No index key means visual search was complete. Spoken results work regardless.",
             inputSchema: objectSchema(
                 properties: [
                     "query": ["type": "string", "description": "What to find. Visual: a caption-style scene description. Spoken: the words to match."],
@@ -268,7 +268,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .addClips,
-            description: "Places one or more media assets on the timeline as a single undoable action. Each entry's asset type must be compatible with its target track (video/image are interchangeable across video/image tracks; audio requires an audio track). When a video asset with audio is placed on a video track, a linked audio clip is automatically created on an audio track (an existing one if available, otherwise a new one). The whole batch is one undo step.\n\ntrackIndex is optional. Omit it on all entries and the tool auto-creates the needed tracks — one shared video track for visual entries and one shared audio track for audio entries (matches the captioning pattern in add_texts). To target existing tracks, set trackIndex on every entry. Mixing (some entries specify, others omit) is rejected — split into two calls.\n\nTracks work as layers: clips on the SAME track are sequential — if a new clip's range overlaps an existing clip on that track, the existing clip is trimmed/split/removed to make room, matching the UI's drag-onto-track overwrite behavior.\n\nNESTING: mediaRef may also be a timelineId — the timeline is placed as a single live nested clip (mediaType 'sequence'), with a linked audio clip when the child has audio. Duration defaults to the child's full length; trims and durationFrames work as for video. Cycles (a timeline containing itself) and empty timelines are rejected.",
+            description: "Places one or more media assets on the timeline as a single undoable action. Each entry's asset type must be compatible with its target track (video/image are interchangeable across video/image tracks; audio requires an audio track). When a video asset with audio is placed on a video track, a linked audio clip is automatically created on an audio track (an existing one if available, otherwise a new one). The whole batch is one undo step.\n\ntrackIndex is optional. Omit it on all entries and the tool auto-creates the needed tracks — one shared video track for visual entries and one shared audio track for audio entries (matches the captioning pattern in add_texts). To target existing tracks, set trackIndex on every entry. Mixing (some entries specify, others omit) is rejected — split into two calls.\n\nTracks work as layers: clips on the SAME track are sequential — if a new clip's range overlaps an existing clip on that track, the existing clip is trimmed/split/removed to make room, matching the UI's drag-onto-track overwrite behavior.\n\nNESTING: mediaRef may also be a timelineId — the timeline is placed as a single live nested clip (mediaType 'sequence'), with a linked audio clip when the child has audio. Duration defaults to the child's full length; source and durationFrames work as for video. Cycles (a timeline containing itself) and empty timelines are rejected.",
             inputSchema: objectSchema(
                 properties: [
                     "entries": [
@@ -280,9 +280,8 @@ enum ToolDefinitions {
                                 "mediaRef": ["type": "string", "description": "ID of the media asset from get_media"],
                                 "trackIndex": ["type": "integer", "description": "Optional. Track index (0-based). Omit on every entry to auto-create one shared track per asset zone (video/audio)."],
                                 "startFrame": ["type": "integer", "description": "Timeline frame position to place the clip (project frames)."],
-                                "durationFrames": ["type": "integer", "description": "Optional. Clip length on the timeline, in project frames. Omit to derive it from the source: the clip spans from trimStartFrame to the source end minus trimEndFrame. Mutually exclusive with trimEndFrame — both pin the clip's end."],
-                                "trimStartFrame": ["type": "integer", "description": "Optional. Frames trimmed off the START of the source media (the clip's in-point) — a SOURCE offset, NOT a timeline position, but measured in PROJECT frames (the timeline's fps, same units as startFrame/durationFrames — never the source's own fps). 0 (default) starts at the source's first frame."],
-                                "trimEndFrame": ["type": "integer", "description": "Optional. Frames trimmed off the END of the source media (the clip's out-point), in PROJECT frames — same units as trimStartFrame. Mutually exclusive with durationFrames. Omit both to run to the source end. Untrimmed source on each side stays as headroom, so the clip can later be extended to reveal it."],
+                                "endFrame": ["type": "integer", "description": "Optional. Occupy timeline frames [startFrame, endFrame) — a gap from get_timeline copies straight in. For stills and frame-exact fills. Mutually exclusive with source."],
+                                "source": ["type": "array", "items": ["type": "number"], "description": "Optional. [startSeconds, endSeconds] — which span of the source to use, in the source seconds search_media hits and inspect_media segments speak. For stills this is the display length in seconds. Omit both for the whole asset. Mutually exclusive with endFrame."],
                             ],
                             "required": ["mediaRef", "startFrame"],
                         ],
@@ -305,9 +304,8 @@ enum ToolDefinitions {
                             "type": "object",
                             "properties": [
                                 "mediaRef": ["type": "string", "description": "ID of the media asset from get_media."],
-                                "durationFrames": ["type": "integer", "description": "Optional. Timeline length in project frames. Omit to derive it from the source: the clip spans from trimStartFrame to the source end minus trimEndFrame (the full source when neither trim is set). Mutually exclusive with trimEndFrame — both pin the clip's end."],
-                                "trimStartFrame": ["type": "integer", "description": "Optional. Frames trimmed off the START of the source media (the clip's in-point) — a SOURCE offset in PROJECT frames (same units as atFrame/durationFrames, never the source's own fps). 0 (default) starts at the source's first frame."],
-                                "trimEndFrame": ["type": "integer", "description": "Optional. Frames trimmed off the END of the source media (the clip's out-point), in PROJECT frames. Mutually exclusive with durationFrames. Omit both to run to the source end. Untrimmed source on each side stays as headroom, so the clip can later be extended to reveal it."],
+                                "source": ["type": "array", "items": ["type": "number"], "description": "Optional. [startSeconds, endSeconds] — which span of the source to use, in source seconds; for stills, the display length. Omit for the whole asset. Mutually exclusive with durationFrames."],
+                                "durationFrames": ["type": "integer", "description": "Optional. Exact length in project frames (entries stack end-to-end, so they have lengths, not positions). Mutually exclusive with source."],
                             ],
                             "required": ["mediaRef"],
                         ],
@@ -353,17 +351,41 @@ enum ToolDefinitions {
             )
         ),
         AgentTool(
-            name: .removeTracks,
-            description: "Removes whole tracks and every clip on them in one undoable action. Linked partners on OTHER tracks are not removed. Remaining track indexes shift down after removal.",
+            name: .manageTracks,
+            description: "Track-level operations in one undoable action: reorder (stacking order — index 0 renders on top; a video track can only move within the video zone, audio within audio), set flags (muted silences an audio track; hidden excludes a video track from the render; syncLocked controls whether ripple edits shift it), and remove (deletes tracks with every clip on them; linked partners on OTHER tracks stay). Arrays run reorder → set → remove; every index refers to the track order at call time (resolved up front). Returns the resulting track order — remaining indexes shift after reorder/remove.",
             inputSchema: objectSchema(
                 properties: [
-                    "trackIndexes": [
+                    "reorder": [
+                        "type": "array",
+                        "description": "Moves, applied in order. Use to fix stacking, e.g. bring a PIP inset's track to index 0.",
+                        "items": [
+                            "type": "object",
+                            "properties": [
+                                "index": ["type": "integer", "description": "Track to move (0-based, current order)."],
+                                "to": ["type": "integer", "description": "Destination index; clamped to the track's type zone."],
+                            ],
+                            "required": ["index", "to"],
+                        ],
+                    ],
+                    "set": [
+                        "type": "array",
+                        "items": [
+                            "type": "object",
+                            "properties": [
+                                "index": ["type": "integer", "description": "Track to change (0-based, current order)."],
+                                "muted": ["type": "boolean", "description": "Silence/unsilence the track's audio."],
+                                "hidden": ["type": "boolean", "description": "Exclude/include a video track in the render."],
+                                "syncLocked": ["type": "boolean", "description": "Whether ripple edits shift this track along."],
+                            ],
+                            "required": ["index"],
+                        ],
+                    ],
+                    "remove": [
                         "type": "array",
                         "items": ["type": "integer"],
-                        "description": "Track indexes (0-based, from get_timeline) to remove.",
+                        "description": "Track indexes to remove, with all their clips.",
                     ],
-                ],
-                required: ["trackIndexes"]
+                ]
             )
         ),
         AgentTool(
@@ -473,7 +495,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .applyLayout,
-            description: "Arrange multiple clips into a common multi-video layout (split screen, picture-in-picture, grid) in one undoable action — the fast path for composing several videos in one frame. Use this instead of hand-setting transforms and screenshot-checking alignment with inspect_timeline.\n\nYou pick a named layout and assign a clip to each of its slots; the tool computes every transform and crop so each clip FILLS its region edge-to-edge WITHOUT stretching — the source is cropped to the slot's shape (cover), like a layout template the videos are dropped into. Pass fit='fit' to letterbox the whole source inside its slot instead (no crop, may leave bars) — use only when the full frame must stay visible (e.g. a screen recording).\n\nThe crop is centered by default. When that chops off something important (a face cropped at the forehead, a subject off to one side), bias which part survives: 'anchor' is a coarse shortcut ('top' keeps the top, etc.), while anchorX/anchorY (0–1) give continuous control for in-between framing — e.g. anchorY 0.35 moves the crop only slightly toward the top, not all the way. To nudge framing after the fact, call apply_layout again with adjusted anchorX/anchorY (clipIds mode re-crops in place).\n\nTwo modes (don't mix across slots):\n• Place new clips: give each slot a 'mediaRef' (from get_media) plus top-level startFrame (default 0) and durationFrames. Creates one stacked video track per slot at that time range; for PIP the inset is placed on top automatically. Video clips bring their linked audio.\n• Re-layout existing clips: give each slot 'clipIds' — one or more existing clips, all framed into that slot (handy when a track holds several sequential takes). Only transforms/crop change — timing and tracks are untouched (so existing track order decides stacking).\n\nEvery slot of the chosen layout must be filled. Layouts and their slot names:\n  • full — main\n  • side_by_side — left, right\n  • top_bottom — top, bottom\n  • pip_bottom_right / pip_bottom_left / pip_top_right / pip_top_left — main, inset\n  • grid_2x2 — top_left, top_right, bottom_left, bottom_right\n  • main_sidebar — main (70%), sidebar (30%)\n  • three_up — left, center, right",
+            description: "Arrange multiple clips into a common multi-video layout (split screen, picture-in-picture, grid) in one undoable action — the fast path for composing several videos in one frame. Use this instead of hand-setting transforms and screenshot-checking alignment with inspect_timeline.\n\nYou pick a named layout and assign a clip to each of its slots; the tool computes every transform and crop so each clip FILLS its region edge-to-edge WITHOUT stretching — the source is cropped to the slot's shape (cover), like a layout template the videos are dropped into. Pass fit='fit' to letterbox the whole source inside its slot instead (no crop, may leave bars) — use only when the full frame must stay visible (e.g. a screen recording).\n\nThe crop is centered by default. When that chops off something important (a face cropped at the forehead, a subject off to one side), bias which part survives: 'anchor' is a coarse shortcut ('top' keeps the top, etc.), while anchorX/anchorY (0–1) give continuous control for in-between framing — e.g. anchorY 0.35 moves the crop only slightly toward the top, not all the way. To nudge framing after the fact, call apply_layout again with adjusted anchorX/anchorY (clipIds mode re-crops in place).\n\nTwo modes (don't mix across slots):\n• Place new clips: give each slot a 'mediaRef' (from get_media) plus top-level startFrame (default 0) and endFrame. Creates one stacked video track per slot at that time range; for PIP the inset is placed on top automatically. Video clips bring their linked audio.\n• Re-layout existing clips: give each slot 'clipIds' — one or more existing clips, all framed into that slot (handy when a track holds several sequential takes). Only transforms/crop change — timing and tracks are untouched (so existing track order decides stacking).\n\nEvery slot of the chosen layout must be filled. Layouts and their slot names:\n  • full — main\n  • side_by_side — left, right\n  • top_bottom — top, bottom\n  • pip_bottom_right / pip_bottom_left / pip_top_right / pip_top_left — main, inset\n  • grid_2x2 — top_left, top_right, bottom_left, bottom_right\n  • main_sidebar — main (70%), sidebar (30%)\n  • three_up — left, center, right",
             inputSchema: objectSchema(
                 properties: [
                     "layout": [
@@ -505,7 +527,7 @@ enum ToolDefinitions {
                         ),
                     ],
                     "startFrame": ["type": "integer", "description": "Placement mode only (mediaRef slots). Project frame where the layout begins. Default 0."],
-                    "durationFrames": ["type": "integer", "description": "Placement mode only (mediaRef slots). Length of the placed clips in project frames. Required when placing new clips."],
+                    "endFrame": ["type": "integer", "description": "Placement mode only (mediaRef slots). The placed clips occupy [startFrame, endFrame). Required when placing new clips."],
                     "fit": [
                         "type": "string",
                         "enum": [LayoutFit.fill.rawValue, LayoutFit.fit.rawValue],

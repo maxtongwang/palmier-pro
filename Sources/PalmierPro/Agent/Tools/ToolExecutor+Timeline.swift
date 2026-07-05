@@ -116,7 +116,7 @@ extension ToolExecutor {
         return obj
     }()
 
-    private static func compactTracks(
+    static func compactTracks(
         _ tracks: [[String: Any]], editor: EditorViewModel, window: Range<Int>?, captionDetail: Bool
     ) -> [[String: Any]] {
         let fold = linkFoldPlan(tracks)

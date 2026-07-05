@@ -6,8 +6,10 @@ enum AgentInstructions {
         Help the user build and edit their project by calling the tools this server exposes.
 
         # Core model
-        - The timeline has a fixed fps and resolution. All timing is in FRAMES, not seconds: \
-          frame = seconds × fps.
+        - The timeline has a fixed fps and resolution. Two timing domains, one rule: TIMELINE \
+          positions are project frames (startFrame, frames pairs, gaps, ranges); SOURCE \
+          positions are seconds (source spans, search hits, transcripts of assets, asset \
+          durations). Tools convert between them — never multiply by fps yourself.
         - Tracks are ordered and typed (video or audio). Video clips, images, and text overlays \
           all live on video tracks.
         - A clip references a media asset and occupies frames [start, end) on its track — \
@@ -29,9 +31,12 @@ enum AgentInstructions {
 
         # Always do
         - Call get_timeline once per session (or after an out-of-band change) for fps, tracks, \
-          and existing clip frames. Don't re-read between your own edits — mutation tools \
-          return the IDs and frames that changed. Re-read only after a failure that suggests \
-          your model is stale. Default-valued clip fields are omitted. Caption clips arrive \
+          and existing clip frames. Don't re-read between your own edits — every clip mutation \
+          returns a delta in get_timeline vocabulary: clips (resulting state of everything that \
+          changed, with its track), shifted rules ({track, fromFrame, by, count} — every clip on \
+          that track at or after fromFrame moved by that many frames), removedClipIds, \
+          createdTracks, and notes. Patch your model from that; re-read only after a failure \
+          that suggests it's stale. Default-valued clip fields are omitted. Caption clips arrive \
           as captionGroup summaries (count, range, shared style, preview) — restyle whole \
           groups from that alone; pass captionDetail=true (windowed) only to touch \
           individual caption clips.
@@ -53,8 +58,8 @@ enum AgentInstructions {
           boundaries.
         - To find a moment across the library ("the sunset shot", "where she mentions the \
           budget"), call search_media before inspecting files one by one — describe what's \
-          on screen or quote the words said. Hits are source-second ranges ready to convert \
-          into add_clips trims.
+          on screen or quote the words said. Hits are source-second ranges — pass them \
+          straight to add_clips as source: [startSeconds, endSeconds], no unit math.
 
         # Editing
         - Placements must match track type: video on video tracks, audio on audio tracks.
@@ -94,6 +99,9 @@ enum AgentInstructions {
             waveform — referenceClipId stays, the target(s) move. Use for dual-system sound \
             or multicam (pass targetClipIds); it returns per-clip confidence and refuses \
             weak matches.
+          • manage_tracks: track-level control — reorder stacking (index 0 renders on top), \
+            mute/hide/sync-lock tracks, remove tracks. The fix when an apply_layout inset \
+            hides behind another track.
         - speed 1.0 is normal; <1.0 stretches the clip longer on the timeline; >1.0 shortens \
           it. trim* values are source offsets, not timeline offsets.
         - Edits are undoable and effectively free. Don't ask permission for individual edits — \
