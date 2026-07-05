@@ -42,42 +42,46 @@ enum SpeakerIdentity {
         }
     }
 
-    /// mediaRef → local label → global label. Empty when alignment isn't possible; callers keep local labels.
-    static func globalLabels(files: [(mediaRef: String, url: URL, turns: [Turn])]) async -> [String: [String: String]] {
-        let files = files.filter { !$0.turns.isEmpty }
-        guard files.count > 1 else { return [:] }
+    struct Assignments {
+        var byFileLocal: [String: [String: Int]] = [:]
+        var newEntries: [(id: Int, centroid: [Float])] = []
+    }
+
+    /// Assigns local speaker labels to global speaker ids by matching fingerprints to centroids; new speakers get new ids.
+    static func assignments(
+        files: [(mediaRef: String, url: URL, turns: [Turn])],
+        registry: [(id: Int, centroid: [Float])]
+    ) async -> Assignments {
+        var out = Assignments()
         var vectors: [(mediaRef: String, local: String, vector: [Float])] = []
-        for file in files {
+        for file in files where !file.turns.isEmpty {
             let prints = await fingerprints(url: file.url, mediaRef: file.mediaRef, turns: file.turns)
             for (local, vector) in prints.sorted(by: { $0.key < $1.key }) {
                 vectors.append((file.mediaRef, local, vector))
             }
         }
-        guard !vectors.isEmpty else { return [:] }
+        guard !vectors.isEmpty else { return out }
 
-        var clusters: [(members: [Int], centroid: [Float], refs: Set<String>)] = []
-        for (i, item) in vectors.enumerated() {
+        var clusters: [(id: Int, centroid: [Float], refs: Set<String>, isNew: Bool)] =
+            registry.map { ($0.id, $0.centroid, [], false) }
+        var nextId = (registry.map(\.id).max() ?? 0) + 1
+        for item in vectors {
             var best = -1
             var bestSim = similarityFloor
             for (c, cluster) in clusters.enumerated() where !cluster.refs.contains(item.mediaRef) {
                 let sim = cosine(item.vector, cluster.centroid)
                 if sim >= bestSim { best = c; bestSim = sim }
             }
-            if best >= 0 {
-                clusters[best].members.append(i)
-                clusters[best].refs.insert(item.mediaRef)
-                clusters[best].centroid = mean(clusters[best].members.map { vectors[$0].vector })
-            } else {
-                clusters.append(([i], item.vector, [item.mediaRef]))
+            if best < 0 {
+                clusters.append((nextId, item.vector, [], true))
+                nextId += 1
+                best = clusters.count - 1
             }
+            clusters[best].refs.insert(item.mediaRef)
+            out.byFileLocal[item.mediaRef, default: [:]][item.local] = clusters[best].id
         }
-        var map: [String: [String: String]] = [:]
-        for (c, cluster) in clusters.enumerated() {
-            for m in cluster.members {
-                map[vectors[m].mediaRef, default: [:]][vectors[m].local] = "Speaker \(c + 1)"
-            }
-        }
-        return map
+        out.newEntries = clusters.filter(\.isNew).map { ($0.id, $0.centroid) }
+        return out
     }
 
     private static func fingerprints(url: URL, mediaRef: String, turns: [Turn]) async -> [String: [Float]] {

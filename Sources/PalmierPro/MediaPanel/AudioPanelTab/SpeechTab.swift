@@ -54,22 +54,13 @@ struct SpeechTab: View {
                 HStack(spacing: AppTheme.Spacing.sm) {
                     ColorPicker("", selection: Binding(
                         get: { editor.projectSpeakers.first(where: { $0.id == speaker.id })?.color ?? speaker.color },
-                        set: { color in
-                            if let i = editor.projectSpeakers.firstIndex(where: { $0.id == speaker.id }) {
-                                editor.projectSpeakers[i].color = color
-                                editor.syncSpeakerColors()
-                            }
-                        }
+                        set: { editor.setSpeakerColor(id: speaker.id, color: $0) }
                     ))
                     .labelsHidden()
                     .controlSize(.small)
                     TextField("Name", text: Binding(
                         get: { editor.projectSpeakers.first(where: { $0.id == speaker.id })?.name ?? speaker.name },
-                        set: { name in
-                            if let i = editor.projectSpeakers.firstIndex(where: { $0.id == speaker.id }) {
-                                editor.projectSpeakers[i].name = name
-                            }
-                        }
+                        set: { editor.renameSpeaker(id: speaker.id, name: $0) }
                     ))
                     .textFieldStyle(.roundedBorder)
                     .controlSize(.small)

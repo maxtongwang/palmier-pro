@@ -1,6 +1,14 @@
 import SwiftUI
 
-/// Session speaker identity for the try-it UI: identify → registry rows + waveform tint masks.
+/// Persisted per-project speaker identity; hidden entries are removed-but-remembered noise.
+struct SpeakerRegistryEntry: Codable, Sendable, Identifiable {
+    var id: Int
+    var name: String
+    var color: [Double]
+    var centroid: [Float]
+    var hidden: Bool
+}
+
 struct ProjectSpeaker: Identifiable {
     let id: Int
     var name: String
@@ -10,6 +18,35 @@ struct ProjectSpeaker: Identifiable {
 extension EditorViewModel {
 
     static let speakerPalette: [Color] = [.blue, .green, .orange, .purple, .pink, .teal, .yellow, .indigo]
+
+    var projectSpeakers: [ProjectSpeaker] {
+        speakerRegistry.filter { !$0.hidden }.map {
+            ProjectSpeaker(id: $0.id, name: $0.name, color: Self.color(from: $0.color))
+        }
+    }
+
+    static func color(from rgba: [Double]) -> Color {
+        guard rgba.count == 4 else { return .blue }
+        return Color(.sRGB, red: rgba[0], green: rgba[1], blue: rgba[2], opacity: rgba[3])
+    }
+
+    static func rgba(from color: Color) -> [Double] {
+        let ns = NSColor(color).usingColorSpace(.sRGB) ?? .systemBlue
+        return [ns.redComponent, ns.greenComponent, ns.blueComponent, ns.alphaComponent]
+    }
+
+    func renameSpeaker(id: Int, name: String) {
+        guard let i = speakerRegistry.firstIndex(where: { $0.id == id }) else { return }
+        speakerRegistry[i].name = name
+        onProjectCheckpointRequired?()
+    }
+
+    func setSpeakerColor(id: Int, color: Color) {
+        guard let i = speakerRegistry.firstIndex(where: { $0.id == id }) else { return }
+        speakerRegistry[i].color = Self.rgba(from: color)
+        onProjectCheckpointRequired?()
+        syncSpeakerColors()
+    }
 
     /// Pushes the current tint palette to the renderer; call after any speaker/toggle change.
     func syncSpeakerColors() {
@@ -22,7 +59,9 @@ extension EditorViewModel {
     }
 
     func removeSpeaker(id: Int) {
-        projectSpeakers.removeAll { $0.id == id }
+        guard let i = speakerRegistry.firstIndex(where: { $0.id == id }) else { return }
+        speakerRegistry[i].hidden = true
+        onProjectCheckpointRequired?()
         for (ref, mask) in mediaVisualCache.speakerMasks {
             mediaVisualCache.speakerMasks[ref] = mask.map { $0 == id ? -1 : $0 }
         }
@@ -84,45 +123,44 @@ extension EditorViewModel {
             }
             Log.preview.notice("identify speakers: \(files.count) files with speaker turns")
             self?.speakerIdentifyPhase = "Identifying…"
-            let map = await SpeakerIdentity.globalLabels(files: files)
+            let registry = await MainActor.run { self?.speakerRegistry ?? [] }
+            let result = await SpeakerIdentity.assignments(
+                files: files, registry: registry.map { ($0.id, $0.centroid) }
+            )
             guard let self else { return }
             await MainActor.run { [self] in
-                self.applySpeakerIdentity(files: files, map: map)
+                self.applySpeakerIdentity(files: files, result: result)
                 self.speakerIdentifyPhase = nil
             }
         }
     }
 
-    private func applySpeakerIdentity(files: [(mediaRef: String, url: URL, turns: [SpeakerIdentity.Turn])], map: [String: [String: String]]) {
-        var gidByLabel: [String: Int] = [:]
-        var speakers: [Int: ProjectSpeaker] = [:]
+    private func applySpeakerIdentity(files: [(mediaRef: String, url: URL, turns: [SpeakerIdentity.Turn])], result: SpeakerIdentity.Assignments) {
+        for entry in result.newEntries {
+            speakerRegistry.append(SpeakerRegistryEntry(
+                id: entry.id, name: "Speaker \(entry.id)",
+                color: Self.rgba(from: Self.speakerPalette[(entry.id - 1) % Self.speakerPalette.count]),
+                centroid: entry.centroid, hidden: false
+            ))
+        }
+        let hiddenIds = Set(speakerRegistry.filter(\.hidden).map(\.id))
         var masks: [String: [Int]] = [:]
         for file in files {
             guard let duration = mediaAssets.first(where: { $0.id == file.mediaRef })?.duration, duration > 0 else { continue }
             let cellCount = Int(duration / VoiceActivity.chunkDuration) + 1
             var mask = [Int](repeating: -1, count: cellCount)
             for turn in file.turns {
-                // Aligned files share global labels; unaligned ones stay distinct per file.
-                let label = map[file.mediaRef]?[turn.speaker] ?? "\(file.mediaRef)·\(turn.speaker)"
-                let gid: Int
-                if let existing = gidByLabel[label] {
-                    gid = existing
-                } else {
-                    gid = gidByLabel.count + 1
-                    gidByLabel[label] = gid
-                    speakers[gid] = ProjectSpeaker(
-                        id: gid, name: "Speaker \(gid)",
-                        color: Self.speakerPalette[(gid - 1) % Self.speakerPalette.count]
-                    )
-                }
+                guard let gid = result.byFileLocal[file.mediaRef]?[turn.speaker], !hiddenIds.contains(gid) else { continue }
                 let lo = max(0, Int(turn.start / VoiceActivity.chunkDuration))
                 let hi = min(cellCount, Int((turn.end / VoiceActivity.chunkDuration).rounded(.up)))
                 if lo < hi { for c in lo..<hi { mask[c] = gid } }
             }
             masks[file.mediaRef] = mask
         }
-        projectSpeakers = speakers.values.sorted { $0.id < $1.id }
         mediaVisualCache.speakerMasks = masks
+        for (ref, locals) in result.byFileLocal { speakerAssignments[ref] = locals }
+        if !result.newEntries.isEmpty { onProjectCheckpointRequired?() }
         syncSpeakerColors()
     }
+
 }

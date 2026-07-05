@@ -223,7 +223,12 @@ extension ToolExecutor {
             isVideoByURL: isVideoByURL
         )
 
-        let speakerMap = await Self.alignedSpeakerLabels(fragments: fragments, transcripts: transcripts.results)
+        let registry = editor.speakerRegistry
+        let assignments = editor.speakerAssignments
+        let speakerMap = await Self.alignedSpeakerLabels(
+            fragments: fragments, transcripts: transcripts.results,
+            registry: registry, assignments: assignments
+        )
 
         var words: [TimelineWord] = []
         for frag in fragments.sorted(by: { $0.clip.startFrame < $1.clip.startFrame }) {
@@ -248,8 +253,22 @@ extension ToolExecutor {
     /// Per-file speaker labels are file-local; align them project-wide by voice fingerprint.
     private static func alignedSpeakerLabels(
         fragments: [TranscriptFragment],
-        transcripts: [URL: TranscriptionResult]
+        transcripts: [URL: TranscriptionResult],
+        registry: [SpeakerRegistryEntry],
+        assignments: [String: [String: Int]]
     ) async -> [String: [String: String]] {
+        let namesById = Dictionary(uniqueKeysWithValues: registry.map { ($0.id, $0.name) })
+        // The identify run is the source of truth; per-file partial coverage is fine because
+        // registry names never collide with raw provider labels.
+        if !assignments.isEmpty {
+            var map: [String: [String: String]] = [:]
+            for (ref, locals) in assignments {
+                for (local, gid) in locals {
+                    map[ref, default: [:]][local] = namesById[gid] ?? "Speaker \(gid)"
+                }
+            }
+            return map
+        }
         var refsByURL: [URL: [String]] = [:]
         var files: [(mediaRef: String, url: URL, turns: [SpeakerIdentity.Turn])] = []
         for frag in fragments {
@@ -261,7 +280,14 @@ extension ToolExecutor {
             let turns = SpeakerIdentity.turns(from: transcript)
             if !turns.isEmpty { files.append((frag.clip.mediaRef, frag.url, turns)) }
         }
-        var map = await SpeakerIdentity.globalLabels(files: files)
+        let result = await SpeakerIdentity.assignments(files: files, registry: registry.map { ($0.id, $0.centroid) })
+        var map: [String: [String: String]] = [:]
+        for (ref, locals) in result.byFileLocal {
+            for (local, gid) in locals {
+                map[ref, default: [:]][local] = namesById[gid] ?? "Speaker \(gid)"
+            }
+        }
+        // Partial alignment would let a remapped label collide with an untouched local one.
         guard !map.isEmpty, files.allSatisfy({ map[$0.mediaRef] != nil }) else { return [:] }
         for (url, refs) in refsByURL {
             guard let primary = refs.first, let entry = map[primary] else { continue }

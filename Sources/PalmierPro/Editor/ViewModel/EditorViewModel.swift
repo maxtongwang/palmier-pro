@@ -61,7 +61,8 @@ final class EditorViewModel {
     var denoiseFailed: Set<String> = []
     var denoiseBaked: Set<String> = []
     var speechAnalyzingCount: Int = 0
-    var projectSpeakers: [ProjectSpeaker] = []
+    var speakerRegistry: [SpeakerRegistryEntry] = []
+    var speakerAssignments: [String: [String: Int]] = [:]
     var speakerIdentifyPhase: String?
     var speakerIdentifyInFlight: Bool { speakerIdentifyPhase != nil }
     var speakerIdentifyError: String?
