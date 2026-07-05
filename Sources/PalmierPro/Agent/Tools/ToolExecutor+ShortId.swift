@@ -11,10 +11,10 @@ extension ToolExecutor {
         "clipId", "sourceClipId", "referenceClipId", "targetClipId",
         "mediaRef", "startFrameMediaRef", "endFrameMediaRef",
         "sourceVideoMediaRef", "videoSourceMediaRef",
-        "folderId", "parentFolderId", "captionGroupId", "timelineId",
+        "captionGroupId", "timelineId", "item", "from",
     ]
     private static let arrayIdKeys: Set<String> = [
-        "clipIds", "targetClipIds", "assetIds", "folderIds",
+        "clipIds", "targetClipIds", "items", "ids", "deletes",
         "referenceMediaRefs", "referenceImageMediaRefs",
         "referenceVideoMediaRefs", "referenceAudioMediaRefs",
     ]
@@ -33,7 +33,6 @@ extension ToolExecutor {
             }
         }
         for asset in editor.mediaAssets { ids.insert(asset.id) }
-        for folder in editor.folders { ids.insert(folder.id) }
         return ids
     }
 

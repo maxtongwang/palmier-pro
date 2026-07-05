@@ -57,6 +57,18 @@ final class ToolHarness {
         editor.mediaAssets.append(asset)
         return asset
     }
+
+    /// Like addAsset, but also registers a manifest entry so library reads (get_media) see it.
+    @discardableResult
+    func makeAsset(name: String, type: ClipType = .video, duration: Double = 5) -> MediaAsset {
+        let asset = addAsset(type: type, duration: duration)
+        asset.name = name
+        editor.mediaManifest.entries.append(MediaManifestEntry(
+            id: asset.id, name: name, type: type,
+            source: .external(absolutePath: asset.url.path), duration: duration
+        ))
+        return asset
+    }
 }
 
 @Suite("ToolExecutor — smoke")
@@ -122,7 +134,9 @@ struct ToolExecutorImportMediaTests {
         ])
 
         #expect(result.isError == false)
-        #expect(ToolHarness.textOf(result).contains("Import started"))
+        let body = try JSONSerialization.jsonObject(with: Data(ToolHarness.textOf(result).utf8)) as? [String: Any]
+        #expect(body?["status"] as? String == "downloading")
+        #expect(body?["mediaRef"] is String)
         let asset = try #require(h.editor.mediaAssets.first)
         #expect(asset.name == "Copied Still")
         #expect(asset.type == .image)
@@ -401,11 +415,15 @@ struct ToolExecutorReadOnlyTests {
 
     // MARK: - get_media
 
-    @Test func getMediaOnEmptyManifestReturnsEmptyEntries() async throws {
+    @Test func getMediaOnEmptyManifestReturnsEmptyAssets() async throws {
         let h = ToolHarness()
         let json = try await h.runOK("get_media") as? [String: Any]
-        let entries = json?["entries"] as? [Any]
-        #expect(entries?.isEmpty == true)
+        let assets = json?["assets"] as? [Any]
+        #expect(assets?.isEmpty == true)
+        // Unfiltered reads include the timelines inventory.
+        let timelines = json?["timelines"] as? [[String: Any]]
+        #expect(timelines?.count == 1)
+        #expect(timelines?.first?["active"] as? Bool == true)
     }
 
     @Test func getMediaRoundsFloatingPointNumbersToThreeDecimalPlaces() async throws {
@@ -443,36 +461,47 @@ struct ToolExecutorReadOnlyTests {
         #expect(raw.range(of: #"-?\d+\.\d{4,}"#, options: .regularExpression) == nil)
 
         let json = try JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: Any]
-        let entries = json?["entries"] as? [[String: Any]]
-        let entry = entries?.first
-        #expect(entry?["duration"] as? Double == 12.346)
-        #expect(entry?["sourceFPS"] as? Double == 29.97)
+        let assets = json?["assets"] as? [[String: Any]]
+        let entry = assets?.first
+        #expect(entry?["durationSeconds"] as? Double == 12.346)
+        #expect(entry?["fps"] as? Double == 29.97)
+        // Generated assets keep their prompt as a content hint; internals stay hidden.
+        #expect(entry?["prompt"] as? String == "Generate")
+        #expect(entry?["generationInput"] == nil)
+        #expect(entry?["source"] == nil)
     }
 
-    // MARK: - list_folders
-
-    @Test func listFoldersOnEmptyProjectReturnsEmptyArray() async throws {
+    @Test func getMediaReportsFolderPathsAndScopesByFolder() async throws {
         let h = ToolHarness()
-        let json = try await h.runOK("list_folders") as? [String: Any]
-        let folders = json?["folders"] as? [Any]
-        #expect(folders?.isEmpty == true)
+        let refs = h.editor.createFolder(name: "Refs", in: nil)
+        let sub = h.editor.createFolder(name: "Sub", in: refs)
+        let inSub = h.makeAsset(name: "a")
+        let atRoot = h.makeAsset(name: "b")
+        h.editor.moveAssetsToFolder(assetIds: [inSub.id], folderId: sub)
+
+        let json = try await h.runOK("get_media") as? [String: Any]
+        #expect(json?["folders"] as? [String] == ["Refs", "Refs/Sub"])
+        let assets = json?["assets"] as? [[String: Any]]
+        let filed = assets?.first { $0["name"] as? String == "a" }
+        #expect(filed?["folder"] as? String == "Refs/Sub")
+
+        // Folder filter includes subfolders and omits the inventory sections.
+        let scoped = try await h.runOK("get_media", args: ["folder": "Refs"]) as? [String: Any]
+        let scopedAssets = scoped?["assets"] as? [[String: Any]]
+        #expect(scopedAssets?.count == 1)
+        #expect(scopedAssets?.first?["name"] as? String == "a")
+        #expect(scoped?["timelines"] == nil)
+        _ = atRoot
     }
 
-    @Test func listFoldersReportsExistingFolders() async throws {
+    @Test func getMediaIdsFilterReturnsOnlyThoseAssets() async throws {
         let h = ToolHarness()
-        let id1 = h.editor.createFolder(name: "Refs", in: nil)
-        _ = h.editor.createFolder(name: "Sub", in: id1)
-
-        let json = try await h.runOK("list_folders") as? [String: Any]
-        let folders = json?["folders"] as? [[String: Any]]
-        #expect(folders?.count == 2)
-        let names = folders?.compactMap { $0["name"] as? String }.sorted() ?? []
-        #expect(names == ["Refs", "Sub"])
-        // Child must carry parentFolderId; root must not. Output ids are shortened prefixes.
-        let sub = folders?.first { $0["name"] as? String == "Sub" }
-        #expect((sub?["parentFolderId"] as? String).map { id1.hasPrefix($0) } == true)
-        let root = folders?.first { $0["name"] as? String == "Refs" }
-        #expect(root?["parentFolderId"] == nil)
+        let a = h.makeAsset(name: "a")
+        _ = h.makeAsset(name: "b")
+        let json = try await h.runOK("get_media", args: ["ids": [a.id]]) as? [String: Any]
+        let assets = json?["assets"] as? [[String: Any]]
+        #expect(assets?.count == 1)
+        #expect((assets?.first?["id"] as? String).map { a.id.hasPrefix($0) } == true)
     }
 
     // MARK: - list_models
@@ -1461,224 +1490,141 @@ struct ToolExecutorTextFolderTests {
         #expect(result.isError)
     }
 
-    // MARK: - create_folder + move_to_folder
+    // MARK: - organize_media
 
-    @Test func createFolderAddsRootLevelFolder() async throws {
+    @Test func organizeCreatesNestedFolderPathsAndIsIdempotent() async throws {
         let h = ToolHarness()
-        let json = try await h.runOK("create_folder", args: ["name": "Refs"]) as? [String: Any]
-        let id = json?["id"] as? String
-        #expect(id != nil)
-        #expect(h.editor.folders.contains { id.map($0.id.hasPrefix) == true && $0.parentFolderId == nil })
-    }
-
-    @Test func createFolderNestsInsideParent() async throws {
-        let h = ToolHarness()
-        let parentId = h.editor.createFolder(name: "Parent", in: nil)
-        let json = try await h.runOK("create_folder", args: [
-            "name": "Child",
-            "parentFolderId": parentId,
+        let json = try await h.runOK("organize_media", args: [
+            "createFolders": ["Refs/Stills"],
         ]) as? [String: Any]
-        let childId = json?["id"] as? String
-        let child = h.editor.folders.first { childId.map($0.id.hasPrefix) == true }
-        #expect(child?.parentFolderId == parentId)
-    }
+        #expect(json?["createdFolders"] as? [String] == ["Refs", "Refs/Stills"])
+        #expect(h.editor.folders.count == 2)
 
-    @Test func createFolderRejectsMissingParent() async throws {
-        let h = ToolHarness()
-        let result = await h.runRaw("create_folder", args: [
-            "name": "Orphan",
-            "parentFolderId": "no-such-folder",
-        ])
-        #expect(result.isError)
-        #expect(ToolHarness.textOf(result).contains("not found"))
-    }
-
-    @Test func createFolderAcceptsBatchEntries() async throws {
-        let h = ToolHarness()
-        let parentId = h.editor.createFolder(name: "Parent", in: nil)
-        let json = try await h.runOK("create_folder", args: [
-            "entries": [
-                ["name": "A"],
-                ["name": "B", "parentFolderId": parentId],
-            ],
+        // Get-or-create: re-running reports an empty result and creates nothing.
+        let again = try await h.runOK("organize_media", args: [
+            "createFolders": ["Refs/Stills"],
         ]) as? [String: Any]
-        let folders = json?["folders"] as? [[String: Any]]
-        let createdIds = Set(folders?.compactMap { $0["id"] as? String } ?? [])
-
-        #expect(folders?.count == 2)
-        // Output ids are shortened prefixes of the stored ids.
-        func created(_ f: MediaFolder) -> Bool { createdIds.contains { f.id.hasPrefix($0) } }
-        #expect(h.editor.folders.contains { created($0) && $0.name == "A" && $0.parentFolderId == nil })
-        #expect(h.editor.folders.contains { created($0) && $0.name == "B" && $0.parentFolderId == parentId })
+        #expect(again?["createdFolders"] == nil)
+        #expect(h.editor.folders.count == 2)
     }
 
-    @Test func createFolderBatchRejectsMissingParentBeforeMutation() async throws {
+    @Test func organizeMovesAssetsIntoPathCreatedOnDemand() async throws {
         let h = ToolHarness()
-        let result = await h.runRaw("create_folder", args: [
-            "entries": [
-                ["name": "Valid"],
-                ["name": "Orphan", "parentFolderId": "no-such-folder"],
-            ],
-        ])
+        let asset = h.makeAsset(name: "clip")
+        let json = try await h.runOK("organize_media", args: [
+            "moves": [["items": [asset.id], "into": "Refs"]],
+        ]) as? [String: Any]
+        #expect(json?["moved"] as? Int == 1)
+        #expect(json?["createdFolders"] as? [String] == ["Refs"])
+        let folderId = h.editor.folders.first { $0.name == "Refs" }?.id
+        #expect(h.editor.mediaAssets.first { $0.id == asset.id }?.folderId == folderId)
 
-        #expect(result.isError)
-        #expect(h.editor.folders.isEmpty)
-    }
-
-    @Test func moveToFolderRelocatesAssets() async throws {
-        let h = ToolHarness()
-        let asset = h.addAsset(type: .video)
-        let folderId = h.editor.createFolder(name: "Refs", in: nil)
-
-        let result = await h.runRaw("move_to_folder", args: [
-            "assetIds": [asset.id],
-            "folderId": folderId,
-        ])
-        #expect(result.isError == false)
-        // mediaAssets always carries folderId; manifest only if there's an entry for this asset.
-        let updated = h.editor.mediaAssets.first { $0.id == asset.id }
-        #expect(updated?.folderId == folderId)
-    }
-
-    @Test func moveToFolderRejectsUnknownAsset() async throws {
-        let h = ToolHarness()
-        let folderId = h.editor.createFolder(name: "Refs", in: nil)
-        let result = await h.runRaw("move_to_folder", args: [
-            "assetIds": ["ghost"],
-            "folderId": folderId,
-        ])
-        #expect(result.isError)
-        #expect(ToolHarness.textOf(result).contains("not found"))
-    }
-
-    @Test func moveToFolderRejectsEmptyAssetIds() async throws {
-        let h = ToolHarness()
-        let result = await h.runRaw("move_to_folder", args: ["assetIds": []])
-        #expect(result.isError)
-    }
-
-    @Test func moveToFolderAcceptsBatchEntriesWithDifferentDestinations() async throws {
-        let h = ToolHarness()
-        let a = h.addAsset(type: .video)
-        let b = h.addAsset(type: .image)
-        let folderA = h.editor.createFolder(name: "A", in: nil)
-        let folderB = h.editor.createFolder(name: "B", in: nil)
-
-        let result = await h.runRaw("move_to_folder", args: [
-            "entries": [
-                ["assetIds": [a.id], "folderId": folderA],
-                ["assetIds": [b.id], "folderId": folderB],
-            ],
-        ])
-
-        #expect(result.isError == false)
-        #expect(h.editor.mediaAssets.first { $0.id == a.id }?.folderId == folderA)
-        #expect(h.editor.mediaAssets.first { $0.id == b.id }?.folderId == folderB)
-    }
-
-    @Test func moveToFolderBatchRejectsUnknownAssetBeforeMutation() async throws {
-        let h = ToolHarness()
-        let asset = h.addAsset(type: .video)
-        let folderId = h.editor.createFolder(name: "Refs", in: nil)
-
-        let result = await h.runRaw("move_to_folder", args: [
-            "entries": [
-                ["assetIds": [asset.id], "folderId": folderId],
-                ["assetIds": ["ghost"], "folderId": folderId],
-            ],
-        ])
-
-        #expect(result.isError)
+        // Omitting 'into' moves back to the root.
+        _ = try await h.runOK("organize_media", args: ["moves": [["items": [asset.id]]]])
         #expect(h.editor.mediaAssets.first { $0.id == asset.id }?.folderId == nil)
     }
 
-    @Test func renameMediaAcceptsBatchEntries() async throws {
-        let h = ToolHarness()
-        let a = h.addAsset(type: .video)
-        let b = h.addAsset(type: .image)
-
-        let result = await h.runRaw("rename_media", args: [
-            "entries": [
-                ["mediaRef": a.id, "name": "A Cut"],
-                ["mediaRef": b.id, "name": "B Still"],
-            ],
-        ])
-
-        #expect(result.isError == false)
-        #expect(h.editor.mediaAssets.first { $0.id == a.id }?.name == "A Cut")
-        #expect(h.editor.mediaAssets.first { $0.id == b.id }?.name == "B Still")
-    }
-
-    @Test func renameMediaBatchRejectsUnknownAssetBeforeMutation() async throws {
-        let h = ToolHarness()
-        let asset = h.addAsset(type: .video)
-        let oldName = asset.name
-
-        let result = await h.runRaw("rename_media", args: [
-            "entries": [
-                ["mediaRef": asset.id, "name": "New"],
-                ["mediaRef": "ghost", "name": "Ghost"],
-            ],
-        ])
-
-        #expect(result.isError)
-        #expect(h.editor.mediaAssets.first { $0.id == asset.id }?.name == oldName)
-    }
-
-    @Test func renameFolderAcceptsBatchEntries() async throws {
+    @Test func organizeReparentsFoldersAndRejectsCycles() async throws {
         let h = ToolHarness()
         let a = h.editor.createFolder(name: "A", in: nil)
-        let b = h.editor.createFolder(name: "B", in: nil)
+        let b = h.editor.createFolder(name: "B", in: a)
+        _ = b
 
-        let result = await h.runRaw("rename_folder", args: [
-            "entries": [
-                ["folderId": a, "name": "Alpha"],
-                ["folderId": b, "name": "Beta"],
-            ],
+        let result = await h.runRaw("organize_media", args: [
+            "moves": [["items": ["A"], "into": "A/B"]],
         ])
-
-        #expect(result.isError == false)
-        #expect(h.editor.folder(id: a)?.name == "Alpha")
-        #expect(h.editor.folder(id: b)?.name == "Beta")
-    }
-
-    @Test func renameFolderBatchRejectsUnknownFolderBeforeMutation() async throws {
-        let h = ToolHarness()
-        let folder = h.editor.createFolder(name: "Original", in: nil)
-
-        let result = await h.runRaw("rename_folder", args: [
-            "entries": [
-                ["folderId": folder, "name": "Changed"],
-                ["folderId": "ghost", "name": "Ghost"],
-            ],
-        ])
-
         #expect(result.isError)
-        #expect(h.editor.folder(id: folder)?.name == "Original")
+        #expect(ToolHarness.textOf(result).contains("into itself"))
+
+        // A rejected cycle must not leave partially-created destination folders behind.
+        let deepCycle = await h.runRaw("organize_media", args: [
+            "moves": [["items": ["A"], "into": "A/B/Deep"]],
+        ])
+        #expect(deepCycle.isError)
+        #expect(h.editor.folders.count == 2)
+
+        _ = try await h.runOK("organize_media", args: [
+            "moves": [["items": ["A/B"], "into": "Elsewhere"]],
+        ])
+        let moved = h.editor.folders.first { $0.name == "B" }
+        let elsewhere = h.editor.folders.first { $0.name == "Elsewhere" }
+        #expect(moved?.parentFolderId == elsewhere?.id)
     }
 
-    @Test func deleteMediaDeletesMultipleAssets() async throws {
+    @Test func organizeRenamesAssetsAndFoldersByPath() async throws {
         let h = ToolHarness()
-        let a = h.addAsset(type: .video)
-        let b = h.addAsset(type: .image)
+        let asset = h.makeAsset(name: "raw")
+        _ = h.editor.createFolder(name: "Old", in: nil)
 
-        let result = await h.runRaw("delete_media", args: ["assetIds": [a.id, b.id]])
-
-        #expect(result.isError == false)
-        #expect(h.editor.mediaAssets.contains { $0.id == a.id } == false)
-        #expect(h.editor.mediaAssets.contains { $0.id == b.id } == false)
+        let json = try await h.runOK("organize_media", args: [
+            "renames": [
+                ["item": asset.id, "name": "Hero take"],
+                ["item": "Old", "name": "New"],
+            ],
+        ]) as? [String: Any]
+        #expect(json?["renamed"] as? Int == 2)
+        #expect(h.editor.mediaAssets.first { $0.id == asset.id }?.name == "Hero take")
+        #expect(h.editor.folders.first?.name == "New")
     }
 
-    @Test func deleteFolderDeletesMultipleFolders() async throws {
+    @Test func organizeRejectsUnknownItemBeforeMutation() async throws {
         let h = ToolHarness()
-        let a = h.editor.createFolder(name: "A", in: nil)
-        let b = h.editor.createFolder(name: "B", in: nil)
+        let asset = h.makeAsset(name: "keep")
+        let result = await h.runRaw("organize_media", args: [
+            "moves": [
+                ["items": [asset.id], "into": "Refs"],
+                ["items": ["ghost"], "into": "Refs"],
+            ],
+        ])
+        #expect(result.isError)
+        #expect(ToolHarness.textOf(result).contains("not an asset id"))
+        #expect(h.editor.mediaAssets.first { $0.id == asset.id }?.folderId == nil)
+        #expect(h.editor.folders.isEmpty)
+    }
 
-        let result = await h.runRaw("delete_folder", args: ["folderIds": [a, b]])
+    @Test func organizeDeletesAssetsAndReportsRemovedClips() async throws {
+        let h = ToolHarness()
+        let asset = h.makeAsset(name: "used")
+        h.editor.timeline.tracks = [Fixtures.videoTrack(clips: [
+            Fixtures.clip(id: "c1", mediaRef: asset.id, start: 0, duration: 60),
+        ])]
 
-        #expect(result.isError == false)
-        #expect(h.editor.folder(id: a) == nil)
-        #expect(h.editor.folder(id: b) == nil)
+        let json = try await h.runOK("organize_media", args: ["deletes": [asset.id]]) as? [String: Any]
+        let deleted = json?["deleted"] as? [String: Any]
+        #expect(deleted?["assets"] as? Int == 1)
+        #expect(json?["clipsRemoved"] as? Int == 1)
+        #expect(h.editor.mediaAssets.isEmpty)
+        #expect(h.editor.timeline.tracks.flatMap(\.clips).isEmpty)
+    }
+
+    @Test func organizeDeletesFolderCascadeWithoutPhantomClipClaims() async throws {
+        let h = ToolHarness()
+        let refs = h.editor.createFolder(name: "Refs", in: nil)
+        _ = h.editor.createFolder(name: "Sub", in: refs)
+
+        let json = try await h.runOK("organize_media", args: ["deletes": ["Refs"]]) as? [String: Any]
+        let deleted = json?["deleted"] as? [String: Any]
+        #expect(deleted?["folders"] as? Int == 1)
+        // Empty folder: no clips were touched, so no clipsRemoved claim.
+        #expect(json?["clipsRemoved"] == nil)
+        #expect(h.editor.folders.isEmpty)
+    }
+
+    @Test func organizeDeletesAcceptShortIdPrefixes() async throws {
+        let h = ToolHarness()
+        let asset = h.makeAsset(name: "prefixed")
+        let json = try await h.runOK("organize_media", args: [
+            "deletes": [String(asset.id.prefix(8))],
+        ]) as? [String: Any]
+        #expect((json?["deleted"] as? [String: Any])?["assets"] as? Int == 1)
+        #expect(h.editor.mediaAssets.isEmpty)
+    }
+
+    @Test func organizeRequiresAtLeastOneOperation() async throws {
+        let h = ToolHarness()
+        let result = await h.runRaw("organize_media")
+        #expect(result.isError)
+        #expect(ToolHarness.textOf(result).contains("Nothing to do"))
     }
 
     // MARK: - ripple_delete_ranges

@@ -52,14 +52,38 @@ extension ToolExecutor {
         }
         let doc = try await AppState.shared.openProjectAsync(at: url)
         notifyNowEditing(doc)
-        return .ok("Now editing “\(doc.displayName ?? Project.defaultProjectName)”. \(AppState.shared.openProjects.count) project(s) open.")
+        return .ok(Self.jsonString(projectSnapshot(doc, status: "active")) ?? "{}")
     }
 
     private func newProject(_ args: [String: Any]) async throws -> ToolResult {
+        try validateUnknownKeys(args, allowed: ["name", "fps", "aspectRatio", "quality"], path: "new_project")
         let name = args.string("name") ?? Project.defaultProjectName
         let doc = try await AppState.shared.createProject(named: name)
+        let settingsArgs = args.filter { ["fps", "aspectRatio", "quality"].contains($0.key) }
+        if !settingsArgs.isEmpty {
+            _ = try setProjectSettings(doc.editorViewModel, settingsArgs)
+        }
         notifyNowEditing(doc)
-        return .ok("Created and now editing “\(doc.displayName ?? name)” at \(doc.fileURL?.path ?? "").")
+        return .ok(Self.jsonString(projectSnapshot(doc, status: "created")) ?? "{}")
+    }
+
+    private func projectSnapshot(_ doc: VideoProject, status: String) -> [String: Any] {
+        let editor = doc.editorViewModel
+        return [
+            "status": status,
+            "name": doc.displayName ?? Project.defaultProjectName,
+            "path": doc.fileURL?.path ?? "",
+            "fps": editor.timeline.fps,
+            "resolution": "\(editor.timeline.width)x\(editor.timeline.height)",
+            "mediaCount": editor.mediaAssets.count,
+            "canGenerate": AccountService.shared.isSignedIn && AccountService.shared.hasCredits,
+            "timelines": editor.timelines.map { t -> [String: Any] in
+                var e: [String: Any] = ["timelineId": t.id, "name": t.name]
+                if t.id == editor.activeTimelineId { e["active"] = true }
+                return e
+            },
+            "openCount": AppState.shared.openProjects.count,
+        ]
     }
 
     private func resolveProjectURL(_ args: [String: Any]) throws -> URL {
@@ -72,7 +96,20 @@ extension ToolExecutor {
             }
             return entry.url
         }
-        throw ToolError("open_project needs an id (from get_projects) or a path.")
+        if let name = args.string("name"), !name.isEmpty {
+            let matches = ProjectRegistry.shared.entries.filter {
+                $0.name.compare(name, options: .caseInsensitive) == .orderedSame
+            }
+            switch matches.count {
+            case 1: return matches[0].url
+            case 0:
+                let known = ProjectRegistry.shared.sortedEntries.prefix(15).map(\.name)
+                throw ToolError("No project named '\(name)'. Known projects: \(known.joined(separator: ", ")). Call get_projects for the full list.")
+            default:
+                throw ToolError("\(matches.count) projects are named '\(name)'. Pick one by path: \(matches.map { $0.url.path }.joined(separator: ", "))")
+            }
+        }
+        throw ToolError("open_project needs a name, an id (from get_projects), or a path.")
     }
 
     private func notifyNowEditing(_ doc: VideoProject) {

@@ -55,37 +55,53 @@ extension ToolExecutor {
     }
 
     func createTimeline(_ editor: EditorViewModel, _ args: [String: Any]) throws -> ToolResult {
-        try validateUnknownKeys(args, allowed: ["name"], path: "create_timeline")
-        let id = editor.createTimeline(name: args.string("name"))
-        let name = editor.timeline(for: id)?.name ?? ""
-        return .ok("Created and switched to timeline \"\(name)\" (timelineId \(id)). It is empty; all edit tools now target it.")
+        try validateUnknownKeys(args, allowed: ["name", "from"], path: "create_timeline")
+        let id: String
+        let note: String
+        if let fromRef = args.string("from") {
+            guard let source = editor.timeline(for: fromRef) else {
+                throw ToolError("No timeline with id '\(fromRef)'. get_media lists the project's timelines.")
+            }
+            guard let newId = editor.duplicateTimeline(fromRef) else {
+                throw ToolError("Couldn't duplicate \"\(source.name)\".")
+            }
+            id = newId
+            if let name = args.string("name") { editor.renameTimeline(id, to: name) }
+            note = "Duplicated \"\(source.name)\" and switched to the copy. Its clip and track ids are new — re-read get_timeline before editing."
+        } else {
+            id = editor.createTimeline(name: args.string("name"))
+            note = "Empty and now active; all edit tools target it."
+        }
+        let payload: [String: Any] = [
+            "timelineId": id,
+            "name": editor.timeline(for: id)?.name ?? "",
+            "active": true,
+            "note": note,
+        ]
+        return .ok(Self.jsonString(payload) ?? "{}")
     }
 
     func setActiveTimeline(_ editor: EditorViewModel, _ args: [String: Any]) throws -> ToolResult {
         try validateUnknownKeys(args, allowed: ["timelineId"], path: "set_active_timeline")
         guard let id = args.string("timelineId") else { throw ToolError("timelineId is required") }
         guard let target = editor.timeline(for: id) else {
-            throw ToolError("No timeline with id '\(id)'. get_timeline lists the project's timelines.")
+            throw ToolError("No timeline with id '\(id)'. get_media lists the project's timelines.")
         }
-        guard editor.activeTimelineId != target.id else {
-            return .ok("\"\(target.name)\" is already the active timeline.")
+        var payload: [String: Any] = [
+            "timelineId": target.id,
+            "name": target.name,
+            "active": true,
+            "totalFrames": target.totalFrames,
+            "fps": target.fps,
+            "trackCount": target.tracks.count,
+        ]
+        if editor.activeTimelineId == target.id {
+            payload["note"] = "Already the active timeline."
+        } else {
+            editor.activateTimeline(target.id)
+            payload["note"] = "Re-read get_timeline — clip and track ids from the previous timeline no longer apply."
         }
-        editor.activateTimeline(target.id)
-        return .ok("Active timeline: \"\(target.name)\" (\(target.totalFrames) frames, \(target.fps) fps). Re-read get_timeline before editing.")
-    }
-
-    func duplicateTimeline(_ editor: EditorViewModel, _ args: [String: Any]) throws -> ToolResult {
-        try validateUnknownKeys(args, allowed: ["timelineId", "name"], path: "duplicate_timeline")
-        let sourceId = args.string("timelineId") ?? editor.activeTimelineId
-        guard let source = editor.timeline(for: sourceId) else {
-            throw ToolError("No timeline with id '\(sourceId)'. get_timeline lists the project's timelines.")
-        }
-        guard let newId = editor.duplicateTimeline(sourceId) else {
-            throw ToolError("Couldn't duplicate \"\(source.name)\".")
-        }
-        if let name = args.string("name") { editor.renameTimeline(newId, to: name) }
-        let copy = editor.timeline(for: newId)
-        return .ok("Duplicated \"\(source.name)\" as \"\(copy?.name ?? "")\" (timelineId \(newId)) and switched to it. Clip and track ids in the copy are new — re-read get_timeline before editing.")
+        return .ok(Self.jsonString(payload) ?? "{}")
     }
 
     private static let trackDefaults: [String: Any] = ["muted": false, "hidden": false, "syncLocked": true]
@@ -282,10 +298,59 @@ extension ToolExecutor {
         }
     }
 
-    func getMedia(_ editor: EditorViewModel) throws -> ToolResult {
-        guard let obj = Self.encodeAsJSONObject(editor.mediaManifest),
-              let json = Self.jsonString(roundJSONFloatingPointNumbers(obj, toPlaces: 3)) else {
-            throw ToolError("Failed to encode media manifest")
+    private static let getMediaAllowedKeys: Set<String> = ["ids", "folder", "pending"]
+    private static let getMediaPromptLimit = 100
+
+    func getMedia(_ editor: EditorViewModel, _ args: [String: Any]) throws -> ToolResult {
+        try validateUnknownKeys(args, allowed: Self.getMediaAllowedKeys, path: "get_media")
+        let idFilter = Set(args.stringArray("ids"))
+        let pendingOnly = args["pending"] as? Bool ?? false
+        var folderScope: Set<String>?
+        if let folderPath = args.string("folder") {
+            folderScope = folderIdsIncludingDescendants(
+                [try folderId(atPath: folderPath, editor: editor)], editor: editor)
+        }
+
+        var assets: [[String: Any]] = []
+        for entry in editor.mediaManifest.entries {
+            if !idFilter.isEmpty && !idFilter.contains(entry.id) { continue }
+            let status = entry.generationStatus
+            let pending = status != nil && status != "none"
+            if pendingOnly && !pending { continue }
+            if let folderScope {
+                guard let f = entry.folderId, folderScope.contains(f) else { continue }
+            }
+            var a: [String: Any] = ["id": entry.id, "name": entry.name, "type": entry.type.rawValue]
+            if entry.duration > 0 { a["durationSeconds"] = entry.duration }
+            if let w = entry.sourceWidth, let h = entry.sourceHeight { a["width"] = w; a["height"] = h }
+            if let fps = entry.sourceFPS { a["fps"] = fps }
+            if entry.hasAudio == true, entry.type == .video { a["hasAudio"] = true }
+            if let path = folderPathString(entry.folderId, editor: editor) { a["folder"] = path }
+            if pending, let status { a["generationStatus"] = status }
+            if let prompt = entry.generationInput?.prompt, !prompt.isEmpty {
+                a["prompt"] = prompt.count > Self.getMediaPromptLimit
+                    ? String(prompt.prefix(Self.getMediaPromptLimit)) + "…" : prompt
+            }
+            assets.append(a)
+        }
+
+        var payload: [String: Any] = ["assets": assets]
+        // Full inventory only on unfiltered reads; filtered reads (polling) stay minimal.
+        if idFilter.isEmpty && !pendingOnly && folderScope == nil {
+            let folderPaths = allFolderPaths(editor)
+            if !folderPaths.isEmpty { payload["folders"] = folderPaths }
+            payload["timelines"] = editor.timelines.map { t -> [String: Any] in
+                var e: [String: Any] = [
+                    "timelineId": t.id, "name": t.name,
+                    "durationSeconds": Double(t.totalFrames) / Double(max(t.fps, 1)),
+                ]
+                if t.id == editor.activeTimelineId { e["active"] = true }
+                if let path = folderPathString(t.folderId, editor: editor) { e["folder"] = path }
+                return e
+            }
+        }
+        guard let json = Self.jsonString(roundJSONFloatingPointNumbers(payload, toPlaces: 3)) else {
+            throw ToolError("Failed to encode media library")
         }
         return .ok(json)
     }

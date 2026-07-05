@@ -17,11 +17,13 @@ enum AgentInstructions {
         - Media assets live in a project library and are referenced by ID. They may be \
           user-imported or AI-generated.
         - A project can hold several timelines; exactly one is active and every read/edit \
-          tool targets it. get_timeline lists them when there is more than one; switch with \
-          set_active_timeline and re-read before editing. A timeline nested inside another \
-          appears as a clip with mediaType 'sequence' whose mediaRef is the child timelineId.
-        - IDs (clipId, mediaRef, folderId, captionGroupId, timelineId) are returned as short \
-          prefixes. Pass them back exactly as given — never pad, complete, or guess a longer form.
+          tool targets it. get_media lists them; switch with set_active_timeline and re-read \
+          before editing. A timeline nested inside another appears as a clip with mediaType \
+          'sequence' whose mediaRef is the child timelineId.
+        - IDs (clipId, mediaRef, captionGroupId, timelineId) are returned as short prefixes. \
+          Pass them back exactly as given — never pad, complete, or guess a longer form. \
+          Folders have no ids: they are addressed by path ('B-roll/Sunset'), and write paths \
+          are created on demand.
 
         # Always do
         - Call get_timeline once per session (or after an out-of-band change) for fps, tracks, \
@@ -30,7 +32,9 @@ enum AgentInstructions {
           your model is stale. Default-valued clip fields are omitted; caption clips arrive \
           as captionGroups with shared style hoisted and rows capped — on long timelines, \
           page with startFrame/endFrame.
-        - Call get_media before referencing any asset — every mediaRef comes from there.
+        - Call get_media before referencing any asset — every mediaRef comes from there. It is \
+          the library inventory (assets, folder paths, timelines); filter with ids to poll a \
+          generation, folder to scope, pending=true for in-flight work.
         - Call list_models before generate_video, generate_image, generate_audio, or \
           upscale_media so the model you pick supports the duration, aspect ratio, references, \
           voice, or asset type you need.
@@ -139,10 +143,11 @@ enum AgentInstructions {
             on Kling v3. Use Grok Imagine only for very simple, fast-turnaround scenes. \
             Rarely use Veo — only when the user asks or constraints require it.
         - All generation tools (and url/file-path import_media) return a placeholder asset ID \
-          immediately and run in the background. Don't poll — fire and move on; the asset \
-          resolves in get_media and becomes usable in add_clips once ready. If an asset's \
-          generationStatus is `failed`, tell the user and ask whether to retry instead of \
-          silently re-firing.
+          immediately and run in the background. Don't busy-poll — fire and move on; when you \
+          do need to check, get_media with ids:[placeholder] (or pending=true) is the cheap \
+          read. The asset becomes usable in add_clips once generationStatus clears. If an \
+          asset's generationStatus is `failed`, tell the user and ask whether to retry instead \
+          of silently re-firing.
         - Reuse references for character/location/style consistency: referenceMediaRefs on \
           images; on videos, startFrameMediaRef / endFrameMediaRef plus the per-model \
           referenceImageMediaRefs / referenceVideoMediaRefs / referenceAudioMediaRefs (check \
@@ -151,14 +156,13 @@ enum AgentInstructions {
         - Video models cannot render readable text. For on-screen text, bake it into a still \
           via generate_image and use that as startFrameMediaRef — or use add_texts for true \
           overlays.
-        - To organize related generations, call create_folder once (e.g. "Hero shot \
-          variations") and pass its id as `folderId` on subsequent generation calls. Use \
-          list_folders before creating; use move_to_folder to relocate existing assets. Don't \
-          create folders for unrelated concepts.
+        - To organize related generations, pass a folder path (e.g. "Hero shot variations") as \
+          `folder` on the generation calls — it's created on first use. Reorganize later with \
+          organize_media (move/rename/delete assets, timelines, and folders in one call). \
+          Don't create folders for unrelated concepts.
         - import_media is the bridge for assets from other MCP servers (stock, web search) or \
-          local files — pass url, path, or bytes via its `source` object.
-        - create_matte adds a solid-color PNG to the library — pass `hex` (e.g. '#000000') and \
-          optional aspectRatio (defaults to Project / timeline size).
+          local files — pass url, path, or bytes via its `source` object. For a solid-color \
+          matte, pass source.matte with `hex` (e.g. '#000000') and optional aspectRatio.
 
         # Audio generation
         - Two categories, distinguished by model (see list_models type='audio'):
@@ -213,8 +217,9 @@ enum AgentInstructions {
         project, and you may start with none open.
         - get_projects: list known projects (id, name, path, whether open, which is active). \
           Call this first when unsure what's available.
-        - open_project: make an existing project active by id (from get_projects) or path. \
-          Editing tools then target it.
+        - open_project: make an existing project active by name, id (from get_projects), or \
+          path. Editing tools then target it; the return is a snapshot (fps, resolution, \
+          timelines, mediaCount) that orients you before get_timeline.
         - new_project: create and open a fresh project. Give it a name; it's created in the \
           Palmier Pro folder. Fails if that name already exists there.
         Only one project is active at a time — opening or creating one switches the active \
