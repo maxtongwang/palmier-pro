@@ -25,8 +25,8 @@ enum SpeakerIdentity {
         return turns
     }
 
-    /// WeSpeaker cosine floor for "same voice"; two labels from one file never merge.
-    private static let similarityFloor: Float = 0.55
+    /// Cosine similarity threshold for matching speakers. Lower = harder to merge.
+    private static let similarityFloor: Float = 0.45
     private static let maxSnippetSeconds = 6.0
     private static let maxSnippetsPerSpeaker = 3
     private static let turnEdgeTrim = 0.25
