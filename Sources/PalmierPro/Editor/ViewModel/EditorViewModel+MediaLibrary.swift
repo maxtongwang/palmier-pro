@@ -375,6 +375,17 @@ extension EditorViewModel {
         if clip.sourceClipType == .sequence, let nested = timeline(for: clip.mediaRef) {
             return nested.name
         }
+        // Multicam clips read as their angle, not the source file.
+        if clip.mediaType == .video, let gid = clip.multicamGroupId,
+           let group = multicamGroup(id: gid),
+           let angle = group.angle(forMediaRef: clip.mediaRef) {
+            if let label = angle.label, let speaker = angle.speaker, label != speaker {
+                return "\(label) · \(speaker)"
+            }
+            if angle.label != nil || angle.speaker != nil {
+                return MulticamGroup.displayName(angle)
+            }
+        }
         return mediaResolver.displayName(for: clip.mediaRef)
     }
 

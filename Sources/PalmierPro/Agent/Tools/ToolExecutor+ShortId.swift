@@ -12,6 +12,7 @@ extension ToolExecutor {
         "mediaRef", "startFrameMediaRef", "endFrameMediaRef",
         "sourceVideoMediaRef", "videoSourceMediaRef",
         "folderId", "parentFolderId", "captionGroupId", "timelineId",
+        "groupId", "audioMediaRef",
     ]
     private static let arrayIdKeys: Set<String> = [
         "clipIds", "targetClipIds", "assetIds", "folderIds",
@@ -34,6 +35,7 @@ extension ToolExecutor {
         }
         for asset in editor.mediaAssets { ids.insert(asset.id) }
         for folder in editor.folders { ids.insert(folder.id) }
+        for group in editor.multicamGroups { ids.insert(group.id) }
         return ids
     }
 

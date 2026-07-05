@@ -57,6 +57,18 @@ fileprivate struct SplitClipsInput: DecodableToolArgs {
     }
 }
 
+fileprivate struct RollEditInput: DecodableToolArgs {
+    let rolls: [Roll]
+    static let allowedKeys: Set<String> = ["rolls"]
+
+    struct Roll: DecodableToolArgs {
+        let clipId: String
+        let edge: String?
+        let deltaFrames: Int
+        static let allowedKeys: Set<String> = ["clipId", "edge", "deltaFrames"]
+    }
+}
+
 fileprivate struct SetClipPropertiesInput: DecodableToolArgs {
     let clipIds: [String]?
     let durationFrames: Int?
@@ -716,6 +728,47 @@ extension ToolExecutor {
             .joined(separator: ", ")
         let newNote = rightIds.isEmpty ? "" : " New right-half clip(s): \(rightIds.joined(separator: ", "))."
         return .ok("Split \(points.count) point(s) [\(cutList)].\(newNote) Re-read with get_timeline for updated ranges.")
+    }
+
+    // MARK: roll_edit
+
+    func rollEdit(_ editor: EditorViewModel, _ args: [String: Any]) throws -> ToolResult {
+        let input: RollEditInput = try decodeToolArgs(args, path: "roll_edit")
+        guard !input.rolls.isEmpty else { throw ToolError("Missing or empty 'rolls' array") }
+
+        // Resolve every cut up front so a bad entry rejects the batch before any edit.
+        var resolved: [(leftId: String, rightId: String, deltaFrames: Int)] = []
+        for (i, roll) in input.rolls.enumerated() {
+            guard roll.deltaFrames != 0 else { throw ToolError("rolls[\(i)]: deltaFrames must be non-zero") }
+            let edgeRaw = roll.edge ?? "end"
+            guard edgeRaw == "start" || edgeRaw == "end" else {
+                throw ToolError("rolls[\(i)]: edge must be 'start' or 'end' (got '\(edgeRaw)')")
+            }
+            let edge: EditorViewModel.TrimEdge = edgeRaw == "end" ? .right : .left
+            guard let clip = editor.clipFor(id: roll.clipId) else { throw ToolError("Clip not found: \(roll.clipId)") }
+            guard let neighbor = editor.rollNeighbor(of: roll.clipId, edge: edge) else {
+                throw ToolError("rolls[\(i)]: clip \(roll.clipId) has no butted neighbor at its \(edgeRaw) — a roll needs two clips meeting at a cut.")
+            }
+            resolved.append(edge == .right
+                ? (clip.id, neighbor.id, roll.deltaFrames)
+                : (neighbor.id, clip.id, roll.deltaFrames))
+        }
+
+        // One atomic action: any failure rolls the whole batch back.
+        let applied: [Int]
+        do {
+            applied = try editor.rollEdits(resolved)
+        } catch {
+            throw ToolError("roll_edit: \(error.localizedDescription) Nothing was changed.")
+        }
+
+        let results = zip(resolved, applied).map { roll, delta -> String in
+            let newBoundary = editor.clipFor(id: roll.rightId)?.startFrame ?? 0
+            var line = "Rolled cut \(roll.leftId)/\(roll.rightId) by \(delta) frame(s) to frame \(newBoundary)."
+            if delta != roll.deltaFrames { line += " Clamped from \(roll.deltaFrames) by available source." }
+            return line
+        }
+        return .ok(results.joined(separator: " "))
     }
 
     // MARK: ripple_delete_ranges

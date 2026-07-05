@@ -150,6 +150,8 @@ final class TimelineInputController {
                     currentFrame: kfFrame,
                     currentDb: dB
                 ))
+            } else if isCommand, let roll = rollDrag(for: clip, localX: localX, clipWidth: rect.width, propagateToLinked: linkedOn) {
+                dragState = .roll(roll)
             } else if isCommand, clip.mediaType == .audio,
                       addVolumeKeyframeOnClick(at: point, clip: clip, clipRect: rect) {
                 dragState = .idle
@@ -363,6 +365,10 @@ final class TimelineInputController {
             }
             dragState = .trimRight(drag)
 
+        case .roll(var drag):
+            drag.deltaFrames = max(drag.minDelta, min(drag.maxDelta, frame - drag.boundaryFrame))
+            dragState = .roll(drag)
+
         case .audioVolumeKf(let drag):
             dragState = .audioVolumeKf(applyVolumeKfDrag(drag, cursorFrame: frame, cursorY: point.y, geometry: geometry))
 
@@ -488,6 +494,16 @@ final class TimelineInputController {
                 }
             }
 
+        case .roll(let drag):
+            if drag.deltaFrames != 0 {
+                editor.rollEdit(
+                    leftId: drag.leadLeftId,
+                    rightId: drag.leadRightId,
+                    deltaFrames: drag.deltaFrames,
+                    propagateToLinked: drag.propagateToLinked
+                )
+            }
+
         case .audioVolumeKf(let drag):
             if drag.currentFrame != drag.originalFrame || drag.currentDb != drag.originalDb {
                 editor.commitMoveVolumeKeyframe(clipId: drag.clipId)
@@ -589,6 +605,28 @@ final class TimelineInputController {
 
     private static func isOnTrimZone(localX: CGFloat, clipWidth: CGFloat) -> Bool {
         localX <= Trim.handleWidth || localX >= clipWidth - Trim.handleWidth
+    }
+
+    /// Cmd on a trim zone with a butted neighbor starts a roll edit on that cut.
+    private func rollDrag(for clip: Clip, localX: CGFloat, clipWidth: CGFloat, propagateToLinked: Bool) -> DragState.RollDrag? {
+        let pair: (leftId: String, rightId: String)
+        if localX >= clipWidth - Trim.handleWidth, let neighbor = editor.rollNeighbor(of: clip.id, edge: .right) {
+            pair = (clip.id, neighbor.id)
+        } else if localX <= Trim.handleWidth, let neighbor = editor.rollNeighbor(of: clip.id, edge: .left) {
+            pair = (neighbor.id, clip.id)
+        } else {
+            return nil
+        }
+        guard let plan = editor.planRoll(leftId: pair.leftId, rightId: pair.rightId, propagateToLinked: propagateToLinked) else {
+            return nil
+        }
+        return DragState.RollDrag(
+            pairs: plan.pairs,
+            boundaryFrame: plan.boundaryFrame,
+            minDelta: plan.minDelta,
+            maxDelta: plan.maxDelta,
+            propagateToLinked: propagateToLinked
+        )
     }
 
     func audioVolumeKfHit(at point: NSPoint, clip: Clip, clipRect: NSRect) -> Int? {

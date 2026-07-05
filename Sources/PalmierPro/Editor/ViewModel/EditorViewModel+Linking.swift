@@ -93,11 +93,20 @@ extension EditorViewModel {
     /// Batch-compute out-of-sync offsets for every linked clip in a single
     /// pass. Clips in sync (or unlinked) are absent from the returned map.
     func linkGroupOffsets() -> [String: Int] {
+        let fps = Double(timeline.fps)
         var byGroup: [String: [(id: String, start: Int)]] = [:]
         for track in timeline.tracks {
             for clip in track.clips {
                 guard let gid = clip.linkGroupId else { continue }
-                byGroup[gid, default: []].append((clip.id, clip.startFrame - clip.trimStartFrame))
+                var start = clip.startFrame - clip.trimStartFrame
+                // Multicam partners come from different sources; compare on the group
+                // timebase so in-sync angle+master-audio pairs read as aligned.
+                if let mcId = clip.multicamGroupId ?? multicamPartnerGroupId(of: clip),
+                   let group = multicamGroup(id: mcId),
+                   let offset = group.offsetSeconds(forMediaRef: clip.mediaRef) {
+                    start -= Int((offset * fps).rounded())
+                }
+                byGroup[gid, default: []].append((clip.id, start))
             }
         }
         var offsets: [String: Int] = [:]

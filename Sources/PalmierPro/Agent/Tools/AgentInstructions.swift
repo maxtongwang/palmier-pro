@@ -83,6 +83,9 @@ enum AgentInstructions {
           • split_clips: pass one or more cut points (each atFrame strictly inside its clip) in \
             one call — multiple cuts on the same clip are fine. Splits only insert boundaries; \
             nothing shifts. Use ripple_delete_ranges instead when you need to remove a span.
+          • roll_edit: nudge an existing cut between two butted clips a few frames without \
+            changing total length — 'a touch more b-roll', 'hold this shot a beat longer'. \
+            Never trim-and-move by hand for that; a roll can't open gaps or shift later clips.
           • sync_audio: align one or more clips to a reference (usually the camera) clip by \
             waveform — referenceClipId stays, the target(s) move. Use for dual-system sound \
             or multicam (pass targetClipIds); it returns per-clip confidence and refuses \
@@ -104,6 +107,30 @@ enum AgentInstructions {
           frames); verify a suspected dangling fragment against the words, not the summary.
         - Pauses and dead space are remove_silence's job, not remove_words': when tightening \
           pacing, run remove_silence first (no transcript needed), then remove_words for fillers.
+
+        # Multicam
+        - Multi-camera recordings of one session (podcasts, interviews, panels) get a dedicated \
+          flow. Start with create_multicam: pass every camera as an angle plus the master mic as \
+          audioMediaRef when one exists — it aligns the sources by audio correlation and places \
+          one video clip linked to the master audio. Don't hand-build this with add_clips + \
+          sync_audio. Set label/speaker per angle when known (each camera framed on one person).
+        - To cut between cameras, decide the plan first, then apply it with ONE batched \
+          switch_angle call using 'switches' ranges — each range is split out and rewritten to \
+          the right angle, in sync, with the linked master audio untouched. For speaker-follows- \
+          camera edits, read get_transcript (words carry speakers), map speakers to angles \
+          (from angle metadata, or inspect_media stills when unsure who's on which camera), and \
+          emit one range per speaker run. Editorial defaults unless told otherwise: hold a shot \
+          at least ~4s, don't switch on brief interjections, favor a wide shot (if there is one) \
+          for crosstalk.
+        - A switches entry may give layout + angles (one per slot) instead of a single angle to \
+          show several cameras at once — side_by_side for a two-person exchange, grid_2x2 for a \
+          panel, pip_* for reactions. The extra angles land as synced overlays on new top tracks \
+          (track indexes shift); the layout ends where the range ends.
+        - Dialogue editing works unchanged on multicam clips: remove_words, remove_silence, and \
+          ripple deletes cut video + master audio together via the link. Adjacent same-angle \
+          cuts merge automatically after switch_angle, keeping the timeline lean.
+        - Nudge an angle boundary a few frames with roll_edit (total length unchanged); \
+          delete_multicam dissolves a group, keeping clips and cuts but ending angle switching.
         - Omit language for transcription unless the user names the spoken language. \
           On-device transcription is language-specific. Cloud transcription auto-detects language. \
           When using local transcription or inspect_media for non-English speech (or speech that \

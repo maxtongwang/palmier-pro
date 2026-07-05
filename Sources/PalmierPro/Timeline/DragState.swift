@@ -6,6 +6,7 @@ enum DragState {
     case moveClip(MoveClipDrag)
     case trimLeft(TrimDrag)
     case trimRight(TrimDrag)
+    case roll(RollDrag)
     case audioVolumeKf(AudioVolumeKfDrag)
     case fadeKnee(FadeKneeDrag)
     case marquee(MarqueeDrag)
@@ -67,6 +68,21 @@ enum DragState {
         let originalTrackId: String
         let originalTrack: Int
         let originalFrame: Int
+    }
+
+    struct RollDrag {
+        /// Boundary pairs rolling together (lead pair first, then linked partners).
+        let pairs: [(leftId: String, rightId: String)]
+        let boundaryFrame: Int
+        let minDelta: Int
+        let maxDelta: Int
+        let propagateToLinked: Bool
+        var deltaFrames: Int = 0
+
+        var leadLeftId: String { pairs[0].leftId }
+        var leadRightId: String { pairs[0].rightId }
+        var leftIds: Set<String> { Set(pairs.map(\.leftId)) }
+        var rightIds: Set<String> { Set(pairs.map(\.rightId)) }
     }
 
     struct TrimDrag {

@@ -292,6 +292,11 @@ final class TimelineView: NSView {
             }
         }()
 
+        let rollDrag: DragState.RollDrag? = {
+            if case .roll(let drag) = inputController.dragState { return drag }
+            return nil
+        }()
+
         let allDraggedIds: Set<String> = {
             guard let drag = moveDrag else { return [] }
             return Set(drag.all.map(\.clipId))
@@ -376,6 +381,30 @@ final class TimelineView: NSView {
                     if ghostRect.intersects(dirtyRect) {
                         ClipRenderer.draw(ghostClip, type: clip.mediaType, in: ghostRect,
                                           isSelected: true, opacity: 0.7, context: ctx,
+                                          cache: editor.mediaVisualCache,
+                                          displayName: editor.clipDisplayLabel(for: clip),
+                                          fps: editor.timeline.fps, isMissing: clipMissing, isGenerating: clipGenerating)
+                    }
+                    continue
+                }
+
+                if let drag = rollDrag, drag.deltaFrames != 0,
+                   drag.leftIds.contains(clip.id) || drag.rightIds.contains(clip.id) {
+                    var previewClip = clip
+                    let sourceDelta = Int((Double(drag.deltaFrames) * clip.speed).rounded())
+                    if drag.leftIds.contains(clip.id) {
+                        previewClip.durationFrames = clip.durationFrames + drag.deltaFrames
+                        previewClip.trimEndFrame = clip.trimEndFrame - sourceDelta
+                    } else {
+                        previewClip.startFrame = clip.startFrame + drag.deltaFrames
+                        previewClip.trimStartFrame = clip.trimStartFrame + sourceDelta
+                        previewClip.durationFrames = clip.durationFrames - drag.deltaFrames
+                    }
+                    let previewRect = geo.clipRect(for: previewClip, trackIndex: ti)
+                    clipDisplayRects[clip.id] = previewRect
+                    if previewRect.intersects(dirtyRect) {
+                        ClipRenderer.draw(previewClip, type: clip.mediaType, in: previewRect,
+                                          isSelected: isSelected, context: ctx,
                                           cache: editor.mediaVisualCache,
                                           displayName: editor.clipDisplayLabel(for: clip),
                                           fps: editor.timeline.fps, isMissing: clipMissing, isGenerating: clipGenerating)
@@ -945,7 +974,9 @@ final class TimelineView: NSView {
             syncItems.append(syncItem)
         }
 
-        for group in [timelineItems, aiItems, nestItems, mediaItems, syncItems] where !group.isEmpty {
+        let multicamItems = multicamMenuItems(for: clip)
+
+        for group in [timelineItems, aiItems, nestItems, mediaItems, multicamItems, syncItems] where !group.isEmpty {
             if !menu.items.isEmpty { menu.addItem(.separator()) }
             group.forEach { menu.addItem($0) }
         }

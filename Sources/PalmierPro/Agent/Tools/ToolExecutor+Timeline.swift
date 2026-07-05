@@ -41,6 +41,22 @@ extension ToolExecutor {
         }
         dict["currentFrame"] = editor.currentFrame
         dict["canGenerate"] = AccountService.shared.isSignedIn && AccountService.shared.hasCredits
+        if !editor.multicamGroups.isEmpty {
+            dict["multicamGroups"] = editor.multicamGroups.map { group -> [String: Any] in
+                var entry: [String: Any] = [
+                    "groupId": group.id,
+                    "name": group.name,
+                    "angles": group.angles.map { angle -> [String: Any] in
+                        var a: [String: Any] = ["mediaRef": angle.mediaRef]
+                        if let label = angle.label { a["label"] = label }
+                        if let speaker = angle.speaker { a["speaker"] = speaker }
+                        return a
+                    },
+                ]
+                if let audioRef = group.audioMediaRef { entry["audioMediaRef"] = audioRef }
+                return entry
+            }
+        }
         if editor.timelines.count > 1 {
             dict["timelines"] = editor.timelines.map { t -> [String: Any] in
                 var entry: [String: Any] = ["timelineId": t.id, "name": t.name]

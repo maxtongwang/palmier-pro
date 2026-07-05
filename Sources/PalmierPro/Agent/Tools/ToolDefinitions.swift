@@ -17,6 +17,10 @@ enum ToolName: String, CaseIterable, Sendable {
     case removeWords = "remove_words"
     case removeSilence = "remove_silence"
     case syncAudio = "sync_audio"
+    case createMulticam = "create_multicam"
+    case switchAngle = "switch_angle"
+    case deleteMulticam = "delete_multicam"
+    case rollEdit = "roll_edit"
     case undo = "undo"
     case addTexts = "add_texts"
     case updateText = "update_text"
@@ -422,6 +426,94 @@ enum ToolDefinitions {
                     "minConfidence": ["type": "number", "description": "Minimum correlation confidence 0–1 (default 0.5)."],
                 ],
                 required: ["referenceClipId"]
+            )
+        ),
+        AgentTool(
+            name: .createMulticam,
+            description: "Create a multicam group from raw footage: multiple cameras (and optionally a separate master mic) covering the same session — podcasts, interviews, panels. Angles are aligned automatically by audio cross-correlation against the master audio (or the first angle when no audioMediaRef is given); per-source offsets are stored in seconds on a shared group timebase, so switches stay in sync regardless of source frame rates. Returns the groupId, per-angle offsetSeconds + confidence, and any angles that failed to align.\n\nBy default the group is also placed on the timeline: one video clip (the first angle) plus the master audio clip, trimmed to their shared span. From there edit as normal — split_clips, remove_words, remove_silence, ripple deletes all work unchanged and keep the master audio aligned via sync-locked tracks — and use switch_angle to change cameras per range. Angle cuts never fragment the master audio; it stays one continuous clip.\n\nAssign label and speaker per angle when known (classic podcast: each camera framed on one person, each mic that person's). With one master mic and no per-camera speakers, leave speaker off and map speakers to angles later from get_transcript + inspect_media.",
+            inputSchema: objectSchema(
+                properties: [
+                    "name": ["type": "string", "description": "Optional group name (default 'Multicam N')."],
+                    "angles": [
+                        "type": "array",
+                        "description": "Camera angles, one entry per video asset. Order matters: the first angle is the sync reference when no audioMediaRef is given, and the default angle placed on the timeline.",
+                        "items": [
+                            "type": "object",
+                            "properties": [
+                                "mediaRef": ["type": "string", "description": "Video asset ID from get_media."],
+                                "label": ["type": "string", "description": "Optional angle name, e.g. 'wide', 'cam A'."],
+                                "speaker": ["type": "string", "description": "Optional speaker this camera covers, e.g. 'Ana'. Lets switch_angle address angles by speaker."],
+                            ],
+                            "required": ["mediaRef"],
+                        ],
+                    ],
+                    "audioMediaRef": ["type": "string", "description": "Optional master audio source: a standalone audio asset (external recorder / mixed mic feed) or one of the angles' mediaRef. Becomes the sync reference and the audio clip placed on the timeline. Omit to use the first angle's own audio."],
+                    "place": ["type": "boolean", "description": "Place the group on the timeline after creating it (default true)."],
+                    "startFrame": ["type": "integer", "description": "Timeline frame to place at (default 0)."],
+                    "searchWindowSeconds": ["type": "number", "description": "Max ± sync offset to search in seconds (default 30)."],
+                    "minConfidence": ["type": "number", "description": "Minimum correlation confidence 0–1 (default 0.5)."],
+                ],
+                required: ["angles"]
+            )
+        ),
+        AgentTool(
+            name: .switchAngle,
+            description: "Switch which camera a multicam clip shows. The clip's mediaRef and trims are rewritten from the group's stored sync offsets, so the new angle shows exactly the same moment — position, duration, speed, and the linked master audio are untouched. Prefer batching a whole cut plan into one call via 'switches'.\n\nTwo addressing modes (mutually exclusive): 'switches' — an array of {startFrame, endFrame, angle} ranges; group clips are split at range boundaries automatically and every piece inside is switched (the speaker-follows-camera flow: read get_transcript speaker runs, then one switch per run). Or 'clipIds' + 'angle' — switch whole existing clips without new cuts.\n\n'angle' accepts a label, speaker name, or mediaRef (prefix ok) from the group. A switches entry may instead give 'layout' (side_by_side, grid_2x2, pip_bottom_right, …) plus 'angles' — one per layout slot, slot order as in apply_layout — to show several angles at once for that range: the base clip becomes the first slot and the other angles are placed as correctly-synced overlay clips on new top tracks (this shifts track indexes). A plain-angle entry over those frames ends the layout: it removes the overlay clips in its range and restores full-frame framing on the base clips. Refine framing afterwards with apply_layout clipIds if needed.\n\nAfter switching, adjacent same-angle continuous cuts are merged automatically (mergedClips in the response) to keep the timeline lean. Returns the affected clipIds; re-read get_timeline only if you need the post-merge clip map.",
+            inputSchema: objectSchema(
+                properties: [
+                    "groupId": ["type": "string", "description": "Multicam group ID from create_multicam or get_timeline. Optional when the project has exactly one group or clipIds are given."],
+                    "switches": [
+                        "type": "array",
+                        "description": "Ranges to switch, in project frames. Clips are split at boundaries as needed. Mutually exclusive with clipIds.",
+                        "items": [
+                            "type": "object",
+                            "properties": [
+                                "startFrame": ["type": "integer", "description": "Range start (inclusive)."],
+                                "endFrame": ["type": "integer", "description": "Range end (exclusive)."],
+                                "angle": ["type": "string", "description": "Angle to show full-frame: label, speaker, or mediaRef. Exactly one of angle or layout."],
+                                "layout": ["type": "string", "enum": VideoLayout.allCases.map(\.rawValue), "description": "Multi-angle layout for this range instead of a single angle."],
+                                "angles": ["type": "array", "items": ["type": "string"], "description": "With layout: one angle per slot, in the layout's slot order."],
+                            ],
+                            "required": ["startFrame", "endFrame"],
+                        ],
+                    ],
+                    "clipIds": ["type": "array", "items": ["type": "string"], "description": "Existing clips to switch whole. Mutually exclusive with switches."],
+                    "angle": ["type": "string", "description": "With clipIds: the angle to switch them to."],
+                    "trackIndex": ["type": "integer", "description": "Optional. Track holding the group's primary clips, when they sit on several tracks (e.g. after layouts)."],
+                ],
+                required: []
+            )
+        ),
+        AgentTool(
+            name: .deleteMulticam,
+            description: "Dissolve a multicam group. Its clips keep their cuts and current angles — they just stop being multicam (no more switch_angle). The group's sync metadata is removed from the project. Undoable.",
+            inputSchema: objectSchema(
+                properties: [
+                    "groupId": ["type": "string", "description": "Group to delete, from create_multicam or get_timeline. Optional when the project has exactly one group."],
+                ],
+                required: []
+            )
+        ),
+        AgentTool(
+            name: .rollEdit,
+            description: "Roll a cut: slide the boundary between two butted clips without changing total length or moving anything downstream — one clip's tail extends while the other's head shrinks by the same frames. The precision tool for 'a touch more b-roll / hold this angle a beat longer' adjustments: unlike trims it can't open gaps or knock later clips out of place, and linked A/V cut at the same frame rolls together. Positive deltaFrames moves the cut later (more of the earlier clip), negative moves it earlier. Clamped to available source material; the response reports the applied delta and new cut frame.",
+            inputSchema: objectSchema(
+                properties: [
+                    "rolls": [
+                        "type": "array",
+                        "description": "Cuts to roll, each identified by a clip and which of its edges sits on the cut.",
+                        "items": [
+                            "type": "object",
+                            "properties": [
+                                "clipId": ["type": "string", "description": "Either clip at the cut."],
+                                "edge": ["type": "string", "enum": ["start", "end"], "description": "Which edge of clipId is the cut being rolled (default 'end')."],
+                                "deltaFrames": ["type": "integer", "description": "Frames to move the cut; positive = later, negative = earlier."],
+                            ],
+                            "required": ["clipId", "deltaFrames"],
+                        ],
+                    ],
+                ],
+                required: ["rolls"]
             )
         ),
         AgentTool(
