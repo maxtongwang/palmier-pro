@@ -61,6 +61,10 @@ final class EditorViewModel {
     var denoiseFailed: Set<String> = []
     var denoiseBaked: Set<String> = []
     var speechAnalyzingCount: Int = 0
+    var projectSpeakers: [ProjectSpeaker] = []
+    var speakerIdentifyPhase: String?
+    var speakerIdentifyInFlight: Bool { speakerIdentifyPhase != nil }
+    var speakerIdentifyError: String?
 
     // MARK: - Panel focus
 
@@ -200,6 +204,15 @@ final class EditorViewModel {
         didSet {
             UserDefaults.standard.set(markDeadAir, forKey: "markDeadAir")
             mediaVisualCache.timelineView?.needsDisplay = true
+        }
+    }
+
+    var markSpeakers: Bool = {
+        UserDefaults.standard.object(forKey: "markSpeakers") as? Bool ?? true
+    }() {
+        didSet {
+            UserDefaults.standard.set(markSpeakers, forKey: "markSpeakers")
+            syncSpeakerColors()
         }
     }
 

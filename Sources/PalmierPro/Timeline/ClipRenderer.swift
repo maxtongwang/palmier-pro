@@ -104,6 +104,7 @@ enum ClipRenderer {
             let audioRect = CGRect(x: contentX, y: contentY, width: contentWidth, height: mainHeight)
             let mask = markDeadAir ? cache?.deadAirMask(for: clip.mediaRef) : nil
             drawWaveform(samples: samples, deadAirMask: mask,
+                         speakerMask: speakerColors.isEmpty ? nil : cache?.speakerMask(for: clip.mediaRef),
                          clip: clip, type: colorType, in: audioRect, context: context)
         }
 
@@ -209,11 +210,13 @@ enum ClipRenderer {
     // MARK: - Waveform
 
     private static let washColor = AppTheme.Status.error.withAlphaComponent(AppTheme.Opacity.medium).cgColor
+    nonisolated(unsafe) static var speakerColors: [Int: CGColor] = [:]
     private static var markDeadAir: Bool { UserDefaults.standard.object(forKey: "markDeadAir") as? Bool ?? true }
 
     private static func drawWaveform(
         samples: [Float],
         deadAirMask: [Bool]?,
+        speakerMask: [Int]? = nil,
         clip: Clip,
         type: ClipType,
         in drawRect: NSRect,
@@ -261,6 +264,11 @@ enum ClipRenderer {
         let maskEnd = max(maskStart, min(maskCount, Int(endFrac * Double(maskCount))))
         let maskVisCount = maskEnd - maskStart
         var washes: [CGRect] = []
+        let spkCount = speakerMask?.count ?? 0
+        let spkStart = max(0, min(spkCount, Int(startFrac * Double(spkCount))))
+        let spkEnd = max(spkStart, min(spkCount, Int(endFrac * Double(spkCount))))
+        let spkVisCount = spkEnd - spkStart
+        var tintedBars: [Int: [CGRect]] = [:]
 
         var bars: [CGRect] = []
         bars.reserveCapacity(lastBar - firstBar)
@@ -284,7 +292,17 @@ enum ClipRenderer {
             let amplitude = min(1, dbAmp)
             let barHeight = max(1, amplitude * (drawHeight - 2))
             let barY = drawRect.maxY - barHeight - 1
-            bars.append(CGRect(x: drawRect.minX + CGFloat(i), y: barY, width: 1, height: barHeight))
+            let bar = CGRect(x: drawRect.minX + CGFloat(i), y: barY, width: 1, height: barHeight)
+            var speaker = -1
+            if let speakerMask, spkVisCount > 0 {
+                let c = min(spkEnd - 1, spkStart + i * spkVisCount / barCount)
+                speaker = speakerMask[c]
+            }
+            if speaker >= 0, speakerColors[speaker] != nil {
+                tintedBars[speaker, default: []].append(bar)
+            } else {
+                bars.append(bar)
+            }
 
             if let deadAirMask, maskVisCount > 0 {
                 let m0 = maskStart + i * maskVisCount / barCount
@@ -295,6 +313,12 @@ enum ClipRenderer {
             }
         }
         context.fill(bars)
+        for (speaker, rects) in tintedBars {
+            if let tint = speakerColors[speaker] {
+                context.setFillColor(tint)
+                context.fill(rects)
+            }
+        }
 
         if !washes.isEmpty {
             context.setFillColor(washColor)
