@@ -23,6 +23,10 @@ extension InspectorView {
                         .padding(.top, AppTheme.Spacing.md)
                     denoiseRow(audios: audios)
                         .padding(.trailing, KeyframesMetrics.controlsColumnWidth + AppTheme.Spacing.sm)
+                    sectionTitleLabel(title: "Beats")
+                        .padding(.top, AppTheme.Spacing.md)
+                    beatsRow(audios: audios)
+                        .padding(.trailing, KeyframesMetrics.controlsColumnWidth + AppTheme.Spacing.sm)
                     if nonTextVisualClips.isEmpty {
                         speedSection(clips: audios)
                             .padding(.trailing, KeyframesMetrics.controlsColumnWidth + AppTheme.Spacing.sm)
@@ -47,6 +51,10 @@ extension InspectorView {
                 VStack(alignment: .leading, spacing: AppTheme.Spacing.smMd) {
                     sectionTitleLabel(title: "Enhance")
                     denoiseRow(audios: audios)
+                }
+                VStack(alignment: .leading, spacing: AppTheme.Spacing.smMd) {
+                    sectionTitleLabel(title: "Beats")
+                    beatsRow(audios: audios)
                 }
                 if nonTextVisualClips.isEmpty {
                     speedSection(clips: audios)
@@ -144,6 +152,60 @@ extension InspectorView {
         }
     }
 
+
+    @ViewBuilder
+    private func beatsRow(audios: [Clip]) -> some View {
+        let refs = beatMediaRefs(audios)
+        if !refs.isEmpty {
+            let store = editor.mediaVisualCache.beats
+            let analyses = refs.compactMap { store.analysis(for: $0) }
+            let analyzing = refs.contains { store.isAnalyzing($0) }
+            let failed = !analyzing && refs.contains { store.hasFailed($0) }
+            VStack(alignment: .leading, spacing: AppTheme.Spacing.smMd) {
+                propertyRow(label: "Beats") {
+                    HStack(spacing: AppTheme.Spacing.sm) {
+                        if refs.count == 1, let analysis = analyses.first, analyses.count == 1 {
+                            Text(analysis.beats.isEmpty
+                                 ? "None found"
+                                 : "\(Int(analysis.bpm.rounded())) BPM · \(analysis.beats.count) beats")
+                                .font(.system(size: AppTheme.FontSize.xs))
+                                .foregroundStyle(AppTheme.Text.mutedColor)
+                        }
+                        Button(analyses.isEmpty ? "Detect Beats" : "Redetect Beats") {
+                            for ref in refs {
+                                guard let asset = editor.mediaAssets.first(where: { $0.id == ref }) else { continue }
+                                store.generate(for: asset, force: store.analysis(for: ref) != nil)
+                            }
+                        }
+                        .controlSize(.small)
+                        .disabled(analyzing)
+                    }
+                }
+                .help("Detects tempo and beat positions — beats show as ticks on the clip and edits snap to them.")
+                if analyzing {
+                    HStack(spacing: AppTheme.Spacing.xs) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("Detecting beats…")
+                            .font(.system(size: AppTheme.FontSize.xs))
+                            .foregroundStyle(AppTheme.Text.mutedColor)
+                    }
+                } else if failed {
+                    Text("Beat detection failed. Check that the media file is reachable, then retry.")
+                        .font(.system(size: AppTheme.FontSize.xs))
+                        .foregroundStyle(AppTheme.Status.errorColor)
+                }
+            }
+        }
+    }
+
+    private func beatMediaRefs(_ audios: [Clip]) -> [String] {
+        var seen = Set<String>()
+        return audios.compactMap { clip in
+            guard clip.sourceClipType != .sequence, seen.insert(clip.mediaRef).inserted else { return nil }
+            return clip.mediaRef
+        }
+    }
 
     @ViewBuilder
     private func fadeRow(label: String, clips: [Clip], edge: FadeEdge) -> some View {

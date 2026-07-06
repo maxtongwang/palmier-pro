@@ -169,6 +169,10 @@ enum ClipRenderer {
             drawTrimHandles(in: rect, context: context)
         }
 
+        if clip.sourceClipType != .sequence, let beats = cache?.beatAnalysis(for: clip.mediaRef) {
+            drawBeatTicks(analysis: beats, clip: clip, in: rect, fps: fps, context: context)
+        }
+
         if opacity < 1.0 {
             context.restoreGState()
         }
@@ -205,6 +209,35 @@ enum ClipRenderer {
             context.addPath(p)
             context.drawPath(using: .fillStroke)
         }
+    }
+
+    private static let beatTickColor = NSColor.systemCyan.withAlphaComponent(0.95).cgColor
+    private static let beatTickBackingColor = NSColor.black.withAlphaComponent(0.55).cgColor
+    private static let beatTickWidth: CGFloat = 2
+    private static let beatTickHeight: CGFloat = 7
+    private static let beatTickMinSpacing: CGFloat = 4
+
+    private static func drawBeatTicks(analysis: BeatAnalysis, clip: Clip, in rect: NSRect, fps: Int, context: CGContext) {
+        guard clip.durationFrames > 0, !analysis.beats.isEmpty else { return }
+        let pxPerFrame = rect.width / CGFloat(clip.durationFrames)
+        guard pxPerFrame > 0 else { return }
+        let body = clipBodyRect(in: rect)
+        guard body.height > beatTickHeight * 2 else { return }
+
+        var ticks: [CGRect] = []
+        var lastX = -CGFloat.greatestFiniteMagnitude
+        for t in analysis.beats {
+            guard let frame = clip.timelineFrame(sourceSeconds: t, fps: fps) else { continue }
+            let x = rect.minX + CGFloat(frame - clip.startFrame) * pxPerFrame
+            guard x - lastX >= beatTickMinSpacing else { continue }
+            lastX = x
+            ticks.append(CGRect(x: x - beatTickWidth / 2, y: body.minY, width: beatTickWidth, height: beatTickHeight))
+        }
+        guard !ticks.isEmpty else { return }
+        context.setFillColor(beatTickBackingColor)
+        context.fill(ticks.map { CGRect(x: $0.minX - 1, y: $0.minY, width: $0.width + 2, height: $0.height + 1) })
+        context.setFillColor(beatTickColor)
+        context.fill(ticks)
     }
 
     // MARK: - Waveform

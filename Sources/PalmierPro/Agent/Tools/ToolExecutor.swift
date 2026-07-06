@@ -106,6 +106,7 @@ final class ToolExecutor {
         case .removeWords:   return try await removeWords(editor, args)
         case .removeSilence: return try removeSilence(editor, args)
         case .syncAudio:     return try await syncAudio(editor, args)
+        case .detectBeats:   return try await detectBeats(editor, args)
         case .undo:          return try undo(editor)
         case .addTexts:      return try addTexts(editor, args)
         case .updateText:    return try updateText(editor, args)

@@ -35,6 +35,7 @@ enum ToolName: String, CaseIterable, Sendable {
     case setKeyframes = "set_keyframes"
     case applyLayout = "apply_layout"
     case syncAudio = "sync_audio"
+    case detectBeats = "detect_beats"
     case undo = "undo"
 
     // Transcript
@@ -550,6 +551,19 @@ enum ToolDefinitions {
                     "minConfidence": ["type": "number", "description": "Minimum correlation confidence 0–1 (default 0.5)."],
                 ],
                 required: ["referenceClipId"]
+            )
+        ),
+        AgentTool(
+            name: .detectBeats,
+            description: "Detect the musical tempo (BPM) and beat positions of an asset's audio. Pass clipId to get beatFrames as project frames mapped through that clip's trim, speed, and position — feed them straight into split_clips, move_clips, or set_keyframes to cut or animate on the beat. Without clipId, returns beatSeconds in source seconds — pass a pair straight to add_clips as source, or use them to plan spans; no unit conversion. Results cache per asset, so repeat calls are instant; detected beats also appear as ticks on the clip and edits snap to them in the timeline. When capped, pass the returned nextStartSeconds as startSeconds for the next page.",
+            inputSchema: objectSchema(
+                properties: [
+                    "mediaRef": ["type": "string", "description": "Asset ID from get_media. Must have an audio track."],
+                    "clipId": ["type": "string", "description": "Optional. A clip referencing this mediaRef; beats return as project frames for that clip (beats outside its trimmed range dropped)."],
+                    "startSeconds": ["type": "number", "description": "Optional. Source-time window start; only beats at or after this."],
+                    "endSeconds": ["type": "number", "description": "Optional. Window end; only beats before this."],
+                ],
+                required: ["mediaRef"]
             )
         ),
         AgentTool(
