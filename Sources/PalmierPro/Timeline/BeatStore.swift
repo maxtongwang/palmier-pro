@@ -31,16 +31,12 @@ final class BeatStore {
     }
 
     func analysisAwaiting(for asset: MediaAsset) async throws -> BeatAnalysis {
-        // Join any in-flight detection so a forced redetect never answers with the stale
-        // cache; retry rather than trust the cache after a failed run.
         if tasks[asset.id] == nil, !failed.contains(asset.id), let existing = analyses[asset.id] {
             return existing
         }
         do {
             return try await detectionTask(for: asset, force: false).value
         } catch {
-            // Superseded or invalidated mid-flight; a newer task may have already
-            // stored a fresh result. Real failures propagate.
             if error is BeatStoreStaleAnalysisError, let existing = analyses[asset.id] {
                 return existing
             }
@@ -48,10 +44,6 @@ final class BeatStore {
         }
     }
 
-    /// One in-flight task per mediaRef; every caller joins it. A forced request
-    /// supersedes a non-forced one by chaining after it, so redetect never gets
-    /// downgraded to a cache hit. Results are dropped when `invalidate`/`reset`
-    /// bumped `epoch` while the analysis was running.
     private func detectionTask(for asset: MediaAsset, force: Bool) -> Task<BeatAnalysis, Error> {
         let key = asset.id
         let predecessor = tasks[key]

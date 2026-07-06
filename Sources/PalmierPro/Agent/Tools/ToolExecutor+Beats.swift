@@ -30,7 +30,6 @@ extension ToolExecutor {
             return .ok("No beats detected — the audio may be too quiet, too short, or non-rhythmic.")
         }
 
-        // Re-resolve after the await so edits made during detection map correctly.
         let clip = try input.clipId.map { try Self.validatedClip($0, asset: asset, editor: editor) }
 
         var beats = analysis.beats
