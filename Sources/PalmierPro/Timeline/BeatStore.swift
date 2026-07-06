@@ -7,7 +7,7 @@ struct BeatStoreStaleAnalysisError: Error {}
 final class BeatStore {
     private var analyses: [String: BeatAnalysis] = [:]
     private var failed: Set<String> = []
-    private var inFlight: Set<String> = []
+    @ObservationIgnored private var tasks: [String: Task<BeatAnalysis, Error>] = [:]
     @ObservationIgnored private var epoch: [String: Int] = [:]
 
     @ObservationIgnored var onBeatsReady: (() -> Void)?
@@ -16,76 +16,74 @@ final class BeatStore {
         MainActor.assumeIsolated { analyses[mediaRef] }
     }
 
-    func isAnalyzing(_ mediaRef: String) -> Bool { inFlight.contains(mediaRef) }
+    func isAnalyzing(_ mediaRef: String) -> Bool { tasks[mediaRef] != nil }
     func hasFailed(_ mediaRef: String) -> Bool { failed.contains(mediaRef) }
 
     func generate(for asset: MediaAsset, force: Bool = false, completion: (@MainActor (BeatAnalysis?) -> Void)? = nil) {
-        let key = asset.id
-        if !force, let existing = analyses[key] {
+        if !force, let existing = analyses[asset.id] {
             completion?(existing)
             return
         }
-        guard !inFlight.contains(key) else { return }
-        inFlight.insert(key)
+        let task = detectionTask(for: asset, force: force)
+        guard let completion else { return }
+        Task { completion(try? await task.value) }
+    }
+
+    func analysisAwaiting(for asset: MediaAsset) async throws -> BeatAnalysis {
+        // Join any in-flight detection so a forced redetect never answers with the stale cache.
+        if tasks[asset.id] == nil, let existing = analyses[asset.id] { return existing }
+        do {
+            return try await detectionTask(for: asset, force: false).value
+        } catch {
+            if let existing = analyses[asset.id] { return existing }
+            throw error
+        }
+    }
+
+    /// One in-flight task per mediaRef; every caller joins it. Results are dropped
+    /// when `invalidate`/`reset` bumped `epoch` while the analysis was running.
+    private func detectionTask(for asset: MediaAsset, force: Bool) -> Task<BeatAnalysis, Error> {
+        let key = asset.id
+        if let existing = tasks[key] { return existing }
         failed.remove(key)
         let startEpoch = epoch[key, default: 0]
 
         let url = asset.url
-        Task.detached(priority: .utility) { [weak self] in
-            var analysis: BeatAnalysis?
+        let task = Task(priority: .utility) { [weak self] in
             do {
-                analysis = try await BeatDetector.analysis(for: url, mediaRef: key, force: force)
-            } catch {
-                Log.preview.error("beats failed mediaRef=\(key): \(Log.detail(error))")
-            }
-            guard let self else { return }
-            await MainActor.run { [self] in
-                guard self.epoch[key, default: 0] == startEpoch else {
-                    completion?(nil)
-                    return
+                let analysis = try await BeatDetector.analysis(for: url, mediaRef: key, force: force)
+                guard let self, self.epoch[key, default: 0] == startEpoch else {
+                    throw BeatStoreStaleAnalysisError()
                 }
-                self.inFlight.remove(key)
-                if let analysis {
-                    self.analyses[key] = analysis
-                    self.onBeatsReady?()
-                } else {
+                self.tasks[key] = nil
+                self.analyses[key] = analysis
+                self.onBeatsReady?()
+                return analysis
+            } catch {
+                if !(error is BeatStoreStaleAnalysisError) {
+                    Log.preview.error("beats failed mediaRef=\(key): \(Log.detail(error))")
+                }
+                if let self, self.epoch[key, default: 0] == startEpoch {
+                    self.tasks[key] = nil
                     self.failed.insert(key)
                 }
-                completion?(analysis)
+                throw error
             }
         }
-    }
-
-    func analysisAwaiting(for asset: MediaAsset) async throws -> BeatAnalysis {
-        let key = asset.id
-        if let existing = analyses[key] { return existing }
-
-        inFlight.insert(key)
-        failed.remove(key)
-        let startEpoch = epoch[key, default: 0]
-        defer { inFlight.remove(key) }
-
-        let analysis = try await BeatDetector.analysis(for: asset.url, mediaRef: key)
-        guard epoch[key, default: 0] == startEpoch else {
-            if let existing = analyses[key] { return existing }
-            throw BeatStoreStaleAnalysisError()
-        }
-
-        analyses[key] = analysis
-        onBeatsReady?()
-        return analysis
+        tasks[key] = task
+        return task
     }
 
     func reset() {
-        for key in inFlight { epoch[key, default: 0] += 1 }
-        inFlight.removeAll()
+        for key in tasks.keys { epoch[key, default: 0] += 1 }
+        tasks.removeAll()
         analyses.removeAll()
         failed.removeAll()
     }
 
     func invalidate(_ mediaRef: String) {
         epoch[mediaRef, default: 0] += 1
-        inFlight.remove(mediaRef)
+        tasks.removeValue(forKey: mediaRef)
         analyses.removeValue(forKey: mediaRef)
         failed.remove(mediaRef)
     }

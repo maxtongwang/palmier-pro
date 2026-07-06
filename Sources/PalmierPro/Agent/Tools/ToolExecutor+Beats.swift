@@ -21,22 +21,17 @@ extension ToolExecutor {
             throw ToolError("detect_beats: media file for \(asset.id) is not on disk yet. Poll get_media and retry once generationStatus becomes 'none'.")
         }
 
-        var clip: Clip?
         if let clipId = input.clipId {
-            guard let c = editor.clipFor(id: clipId) else { throw ToolError("Clip not found: \(clipId)") }
-            guard c.sourceClipType != .sequence else {
-                throw ToolError("detect_beats: clip \(clipId) is a nested sequence; pass a clip that references the audio asset directly.")
-            }
-            guard c.mediaRef == asset.id else {
-                throw ToolError("detect_beats: clip \(clipId) references \(c.mediaRef), not \(asset.id).")
-            }
-            clip = c
+            _ = try Self.validatedClip(clipId, asset: asset, editor: editor)
         }
 
         let analysis = try await editor.mediaVisualCache.beats.analysisAwaiting(for: asset)
         guard !analysis.beats.isEmpty else {
             return .ok("No beats detected — the audio may be too quiet, too short, or non-rhythmic.")
         }
+
+        // Re-resolve after the await so edits made during detection map correctly.
+        let clip = try input.clipId.map { try Self.validatedClip($0, asset: asset, editor: editor) }
 
         var beats = analysis.beats
         if let s = input.startSeconds { beats = beats.filter { $0 >= s } }
@@ -59,5 +54,16 @@ extension ToolExecutor {
         payload["beatCount"] = (payload["beatFrames"] as? [Int])?.count ?? beats.count
         if let nextStartSeconds { payload["nextStartSeconds"] = nextStartSeconds }
         return .ok(Self.jsonString(roundJSONFloatingPointNumbers(payload, toPlaces: 3)) ?? "Detected \(Int(analysis.bpm.rounded())) BPM, \(beats.count) beats.")
+    }
+
+    private static func validatedClip(_ clipId: String, asset: MediaAsset, editor: EditorViewModel) throws -> Clip {
+        guard let clip = editor.clipFor(id: clipId) else { throw ToolError("Clip not found: \(clipId)") }
+        guard clip.sourceClipType != .sequence else {
+            throw ToolError("detect_beats: clip \(clipId) is a nested sequence; pass a clip that references the audio asset directly.")
+        }
+        guard clip.mediaRef == asset.id else {
+            throw ToolError("detect_beats: clip \(clipId) references \(clip.mediaRef), not \(asset.id).")
+        }
+        return clip
     }
 }
