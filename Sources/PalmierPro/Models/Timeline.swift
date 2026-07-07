@@ -21,7 +21,10 @@ struct Timeline: Codable, Sendable, Equatable, Identifiable {
     var height: Int = 1080
     var settingsConfigured: Bool = false
     var folderId: String?
+    var multicam: MulticamSource?
     var tracks: [Track] = []
+
+    var isMulticam: Bool { multicam != nil }
 
     var totalFrames: Int {
         var maxFrame = 0
@@ -70,7 +73,7 @@ struct Timeline: Codable, Sendable, Equatable, Identifiable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, fps, width, height, settingsConfigured, folderId, tracks
+        case id, name, fps, width, height, settingsConfigured, folderId, multicam, tracks
     }
 }
 
@@ -85,6 +88,7 @@ extension Timeline {
             height: try c.decode(Int.self, forKey: .height),
             settingsConfigured: (try? c.decode(Bool.self, forKey: .settingsConfigured)) ?? false,
             folderId: try? c.decode(String.self, forKey: .folderId),
+            multicam: try? c.decode(MulticamSource.self, forKey: .multicam),
             tracks: try c.decode([Track].self, forKey: .tracks)
         )
     }

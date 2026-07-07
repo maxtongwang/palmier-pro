@@ -179,6 +179,7 @@ enum AppTheme {
         static let text = NSColor(red: 0xB7/255.0, green: 0x2D/255.0, blue: 0xD2/255.0, alpha: 1)
         static let lottie = NSColor(red: 0xE0/255.0, green: 0xA8/255.0, blue: 0x00/255.0, alpha: 1)
         static let sequence = NSColor(red: 0x2D/255.0, green: 0x9D/255.0, blue: 0x78/255.0, alpha: 1)
+        static let multicam = NSColor(red: 0xD2/255.0, green: 0x7D/255.0, blue: 0x2D/255.0, alpha: 1)
     }
 
     // MARK: - Corner radii
