@@ -37,6 +37,11 @@ enum ToolName: String, CaseIterable, Sendable {
     case syncClips = "sync_clips"
     case undo = "undo"
 
+    // Multicam
+    case manageMulticam = "manage_multicam"
+    case changeCam = "change_cam"
+    case getMulticam = "get_multicam"
+
     // Transcript
     case getTranscript = "get_transcript"
     case removeWords = "remove_words"
@@ -551,6 +556,90 @@ enum ToolDefinitions {
                     "minConfidence": ["type": "number", "description": "Minimum audio correlation confidence 0–1 (default 0.5)."],
                 ],
                 required: ["referenceClipId"]
+            )
+        ),
+        AgentTool(
+            name: .manageMulticam,
+            description: "Multicam group lifecycle: create a group, or bake one to plain clips. Usually pass exactly one.\n\ncreate: groups multi-camera / multi-mic footage of one recording session (podcasts, interviews) into a single synced timeline clip. Members are aligned by cross-correlating audio against the master member's clock (default: the first mic). The placed clip cuts, moves, ripples, and word-edits (remove_words / remove_silence) like ONE ordinary video-with-audio clip — sync between angles and mics is preserved by construction; switch what it shows with change_cam. Member kinds by setup: separate cameras and mics → angle + mic; one file per participant with its own audio (remote podcast) → both; cameras plus a single master mic → angle + one mic. Returns per-member offsetSeconds and confidence (0–1); members that fail correlation land in needsAttention and can't be used as angles — pin an explicit offsetSeconds instead.\n\nbake: decomposes the group's clip(s) on the active timeline into plain clips (angle cuts and mics become ordinary, hand-editable clips). The natural endpoint for short projects once switching is done; after baking, sync is positional and change_cam no longer applies. To delete a group outright, remove its clips and delete its timeline via organize_media.",
+            inputSchema: objectSchema(
+                properties: [
+                    "create": objectSchema(
+                        properties: [
+                            "members": [
+                                "type": "array",
+                                "description": "The session's source files, at least two.",
+                                "items": objectSchema(
+                                    properties: [
+                                        "mediaRef": ["type": "string", "description": "Media asset id from get_media."],
+                                        "kind": ["type": "string", "enum": ["angle", "mic", "both"], "description": "angle = camera (scratch audio used only for sync), mic = audio in the mix, both = camera whose audio is that person's mic."],
+                                        "angleLabel": ["type": "string", "description": "Handle used by change_cam and shown in the UI, e.g. 'cam-a', 'wide'. Default: derived from the file name."],
+                                        "offsetSeconds": ["type": "number", "description": "Pin this member's start on the group clock instead of correlating (e.g. from a known slate). Pinned members skip sync."],
+                                    ],
+                                    required: ["mediaRef", "kind"]
+                                ),
+                            ],
+                            "name": ["type": "string", "description": "Group name. Default: Multicam N."],
+                            "master": ["type": "string", "description": "angleLabel or mediaRef whose clock defines group time AND whose audio becomes the transcript/waveform source; must have audio. Default: the first mic/both member in list order — when members are all 'both', pass this explicitly (pick the source that hears every speaker best, e.g. the host's)."],
+                            "place": ["type": "boolean", "description": "Place the group on the active timeline (default true)."],
+                            "startFrame": ["type": "integer", "description": "Where the placed clip starts. Default: appended at the end of the timeline."],
+                            "searchWindowSeconds": ["type": "number", "description": "Max ± start-time difference to search between members (default 240)."],
+                        ],
+                        required: ["members"]
+                    ),
+                    "bake": objectSchema(
+                        properties: [
+                            "groupId": ["type": "string", "description": "Bake every clip of this group on the active timeline."],
+                            "clipId": ["type": "string", "description": "Bake just this clip of the group."],
+                        ]
+                    ),
+                ]
+            )
+        ),
+        AgentTool(
+            name: .changeCam,
+            description: "Switch which camera a multicam group shows, per project-frame range — batched entries, one undo step. Each entry is either a full-frame angle ({range, angle}) or a multi-angle layout ({range, layout, slots}) for split-screen and PiP moments. The group's timeline clip is never split or moved: angle cuts happen inside the group, the returned delta is usually empty, and track indices never shift — no re-read needed between calls. Works transparently across word-cut fragments, and after remove_words/remove_silence in either order.\n\nRanges where a chosen angle wasn't recording are clamped to what it covers (reported in clamped with the culprit) or skipped entirely; a skipped range leaves no edits. Adjacent same-angle cuts merge back into one (cutsMerged). Returns the resulting program as run-length [angle, startFrame, endFrame) rows over the touched span.",
+            inputSchema: objectSchema(
+                properties: [
+                    "groupId": ["type": "string", "description": "The multicam group (from manage_multicam create or get_media's timelines). Or pass clipId."],
+                    "clipId": ["type": "string", "description": "Any clip of the group on the active timeline."],
+                    "entries": [
+                        "type": "array",
+                        "description": "Switches to apply, in order. Later entries win on overlap.",
+                        "items": objectSchema(
+                            properties: [
+                                "range": ["type": "array", "items": ["type": "integer"], "description": "[startFrame, endFrame) on the current timeline."],
+                                "angle": ["type": "string", "description": "Full-frame angle for the range. Mutually exclusive with layout."],
+                                "layout": ["type": "string", "enum": VideoLayout.allCases.filter { $0 != .full }.map(\.rawValue), "description": "Multi-angle layout; fill every slot via slots."],
+                                "slots": [
+                                    "type": "array",
+                                    "description": "One {slot, angle} per layout slot; the first slot drives the program track.",
+                                    "items": objectSchema(
+                                        properties: [
+                                            "slot": ["type": "string", "description": "Slot id, e.g. left/right, top_left, main/inset."],
+                                            "angle": ["type": "string", "description": "angleLabel to show in that slot."],
+                                        ],
+                                        required: ["slot", "angle"]
+                                    ),
+                                ],
+                                "fit": ["type": "string", "enum": [LayoutFit.fill.rawValue, LayoutFit.fit.rawValue], "description": "fill (default) cover-crops each slot; fit letterboxes."],
+                            ],
+                            required: ["range"]
+                        ),
+                    ],
+                ],
+                required: ["entries"]
+            )
+        ),
+        AgentTool(
+            name: .getMulticam,
+            description: "Read a multicam group: members (angleLabel, kind, offsetSeconds, confidence, which is master), the current program cut as run-length [angle, startFrame, endFrame) rows in project frames, and the group's clips on the active timeline. Use it to learn angle labels before change_cam, or to review the cut without the per-clip noise of get_timeline (angle cuts never appear there). Window long timelines with startFrame/endFrame.",
+            inputSchema: objectSchema(
+                properties: [
+                    "groupId": ["type": "string", "description": "The multicam group id. Or pass clipId."],
+                    "clipId": ["type": "string", "description": "Any clip of the group on the active timeline."],
+                    "startFrame": ["type": "integer", "description": "Optional window start for program rows."],
+                    "endFrame": ["type": "integer", "description": "Optional window end (exclusive)."],
+                ]
             )
         ),
         AgentTool(

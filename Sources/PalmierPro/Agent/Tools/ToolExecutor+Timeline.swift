@@ -21,6 +21,9 @@ extension ToolExecutor {
         }
         dict["currentFrame"] = editor.currentFrame
         dict["canGenerate"] = Self.canGenerate
+        if editor.timeline.isMulticam {
+            dict["note"] = "This is the inside of a multicam group the user has open. The time axis is locked (no move/ripple/retime/track changes); split, trim, delete, and property edits are allowed. Drive angle cuts with change_cam; the edit timelines are listed in get_media."
+        }
         if editor.timelines.count > 1 {
             dict["timelines"] = timelineEntries(editor)
         }
@@ -40,6 +43,9 @@ extension ToolExecutor {
         editor.timelines.map { t in
             var e: [String: Any] = ["timelineId": t.id, "name": t.name]
             if t.id == editor.activeTimelineId { e["active"] = true }
+            if let source = t.multicam {
+                e["multicam"] = ["angles": source.angles.map(\.angleLabel), "mics": source.mics.map(\.angleLabel)]
+            }
             if detailed {
                 e["durationSeconds"] = Double(t.totalFrames) / Double(max(t.fps, 1))
                 if let path = folderPathString(t.folderId, editor: editor) { e["folder"] = path }
@@ -48,7 +54,7 @@ extension ToolExecutor {
         }
     }
 
-    private static func frameWindow(_ args: [String: Any]) throws -> Range<Int>? {
+    static func frameWindow(_ args: [String: Any]) throws -> Range<Int>? {
         guard args.int("startFrame") != nil || args.int("endFrame") != nil else { return nil }
         let s = args.int("startFrame") ?? 0
         let e = args.int("endFrame") ?? Int.max
@@ -65,6 +71,9 @@ extension ToolExecutor {
         if let fromRef = args.string("from") {
             guard let source = editor.timeline(for: fromRef) else {
                 throw ToolError("No timeline with id '\(fromRef)'. get_media lists the project's timelines.")
+            }
+            guard !source.isMulticam else {
+                throw ToolError("'\(source.name)' is a multicam group — place it with add_clips or drive it with change_cam.")
             }
             guard let newId = editor.duplicateTimeline(fromRef) else {
                 throw ToolError("Couldn't duplicate \"\(source.name)\".")
@@ -90,6 +99,9 @@ extension ToolExecutor {
         guard let id = args.string("timelineId") else { throw ToolError("timelineId is required") }
         guard let target = editor.timeline(for: id) else {
             throw ToolError("No timeline with id '\(id)'. get_media lists the project's timelines.")
+        }
+        guard !target.isMulticam else {
+            throw ToolError("'\(target.name)' is a multicam group — drive it with change_cam / get_multicam. (Users can open it in the UI; its structure is locked.)")
         }
         var payload: [String: Any] = [
             "timelineId": target.id,

@@ -435,6 +435,10 @@ extension ToolExecutor {
         guard input.hasAnyProperty else {
             throw ToolError("set_clip_properties needs at least one property to apply")
         }
+        if editor.timeline.isMulticam,
+           input.trimStartFrame != nil || input.trimEndFrame != nil || input.durationFrames != nil || input.speed != nil {
+            throw ToolError("Timing is derived inside a multicam group — switch angles with change_cam or trim in the UI; property fields (volume, opacity, transform, effects) are editable.")
+        }
         if let df = input.durationFrames, df < 1 {
             throw ToolError("durationFrames must be >= 1 (got \(df))")
         }
