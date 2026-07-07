@@ -110,14 +110,19 @@ extension EditorViewModel {
 
     // MARK: - CRUD
 
+    /// New empty timeline inheriting the active timeline's format.
+    func newTimelineMatchingActive(named name: String) -> Timeline {
+        var t = Timeline(name: name)
+        t.fps = timeline.fps
+        t.width = timeline.width
+        t.height = timeline.height
+        t.settingsConfigured = timeline.settingsConfigured
+        return t
+    }
+
     @discardableResult
     func createTimeline(name: String? = nil, activate: Bool = true) -> String {
-        let active = timeline
-        var t = Timeline(name: name ?? nextTimelineName())
-        t.fps = active.fps
-        t.width = active.width
-        t.height = active.height
-        t.settingsConfigured = active.settingsConfigured
+        let t = newTimelineMatchingActive(named: name ?? nextTimelineName())
         timelines.append(t)
         registerRemoveUndo(for: t.id, actionName: "New Timeline")
         if activate { activateTimeline(t.id) }
@@ -160,6 +165,7 @@ extension EditorViewModel {
         let wasActive = activeTimelineId == id
         if wasActive {
             let fallback = openTimelineIds.first { $0 != id }
+                ?? timelines.first { $0.id != id && !$0.isMulticam }?.id
                 ?? timelines.first { $0.id != id }!.id
             activateTimeline(fallback)
         }
@@ -263,11 +269,20 @@ extension Timeline {
     /// Fresh track/clip/group ids for a duplicated timeline so ids stay unique project-wide.
     mutating func regenerateIds() {
         var groups: [String: String] = [:]
+        var trackIds: [String: String] = [:]
         for ti in tracks.indices {
-            tracks[ti].id = UUID().uuidString
+            let fresh = UUID().uuidString
+            trackIds[tracks[ti].id] = fresh
+            tracks[ti].id = fresh
             for ci in tracks[ti].clips.indices {
                 tracks[ti].clips[ci].freshenIds(groups: &groups)
             }
+        }
+        // Engine-managed track identity follows the tracks it names.
+        if var source = multicam {
+            source.programTrackId = trackIds[source.programTrackId] ?? source.programTrackId
+            source.overlayTrackIds = source.overlayTrackIds.map { trackIds[$0] ?? $0 }
+            multicam = source
         }
     }
 }

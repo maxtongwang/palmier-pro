@@ -26,16 +26,16 @@ extension EditorViewModel {
         return nil
     }
 
-    /// Drops `childId` into the active timeline as a single nested clip.
+    /// Nests `childId` into the active timeline. Optionally restricts to a frame `window`.
     @discardableResult
-    func nestTimeline(_ childId: String, cursor: TrackDropTarget, atFrame frame: Int) -> Bool {
-        guard let child = timeline(for: childId) else { return false }
+    func nestTimeline(_ childId: String, cursor: TrackDropTarget, atFrame frame: Int, window: Range<Int>? = nil) -> Bool {
+        guard let child = timeline(for: childId), !refusesMulticamStructureEdit() else { return false }
         if let reason = nestBlockReason(childId: childId) {
             mediaPanelToast = MediaPanelToast(message: reason)
             return false
         }
 
-        let duration = child.totalFrames
+        let duration = window?.count ?? child.totalFrames
         let startFrame = max(0, frame)
 
         withTimelineSwap(actionName: "Nest Timeline") {
@@ -46,7 +46,7 @@ extension EditorViewModel {
             }
             let videoIdx = materializeTrackIndex(target: videoTarget, type: .video)
             let audioIdx = child.hasAudioClips ? resolveOrCreateAudioTrack(startFrame: startFrame, duration: duration) : nil
-            insertNestCarriers(for: child, start: startFrame, duration: duration, videoIdx: videoIdx, audioIdx: audioIdx)
+            insertNestCarriers(for: child, start: startFrame, duration: duration, trimStart: window?.lowerBound ?? 0, videoIdx: videoIdx, audioIdx: audioIdx)
         }
         return true
     }
@@ -64,11 +64,7 @@ extension EditorViewModel {
         let start = all.map(\.startFrame).min()!
         let duration = all.map(\.endFrame).max()! - start
 
-        var child = Timeline(name: uniqueName({ "Nest \($0)" }, startingAt: 1))
-        child.fps = timeline.fps
-        child.width = timeline.width
-        child.height = timeline.height
-        child.settingsConfigured = timeline.settingsConfigured
+        var child = newTimelineMatchingActive(named: uniqueName({ "Nest \($0)" }, startingAt: 1))
         child.tracks = lanes.map { lane in
             Track(type: lane.type, clips: lane.clips.map { clip in
                 var c = clip
@@ -182,7 +178,7 @@ extension EditorViewModel {
 
     /// Inserts linked `.sequence` carrier clips on already-resolved tracks, clearing their span.
     @discardableResult
-    private func insertNestCarriers(for child: Timeline, start: Int, duration: Int, videoIdx: Int?, audioIdx: Int?) -> Set<String> {
+    private func insertNestCarriers(for child: Timeline, start: Int, duration: Int, trimStart: Int = 0, videoIdx: Int?, audioIdx: Int?) -> Set<String> {
         let linkGroupId = videoIdx != nil && audioIdx != nil ? UUID().uuidString : nil
         var carrierIds: Set<String> = []
         if let vi = videoIdx {
@@ -193,6 +189,7 @@ extension EditorViewModel {
                 sourceClipType: .sequence,
                 startFrame: start,
                 durationFrames: duration,
+                trimStartFrame: trimStart,
                 transform: fitTransform(sourceWidth: child.width, sourceHeight: child.height)
             )
             clip.linkGroupId = linkGroupId
@@ -207,7 +204,8 @@ extension EditorViewModel {
                 mediaType: .audio,
                 sourceClipType: .sequence,
                 startFrame: start,
-                durationFrames: duration
+                durationFrames: duration,
+                trimStartFrame: trimStart
             )
             clip.linkGroupId = linkGroupId
             timeline.tracks[ai].clips.append(clip)

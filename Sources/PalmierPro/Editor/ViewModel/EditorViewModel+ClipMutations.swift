@@ -150,15 +150,13 @@ extension EditorViewModel {
         right.fadeInFrames = 0
         right.clampFadesToDuration()
 
-        // Split every animatable track at the cut, inserting a boundary keyframe so each
-        // curve stays continuous across the split (rather than copying the whole track to
-        // both halves, which leaves out-of-range/unrebased keyframes on each side).
-        (left.opacityTrack,  right.opacityTrack)  = splitKeyframeTrack(clip.opacityTrack,  at: splitOffset, fallback: clip.opacity)
-        (left.volumeTrack,   right.volumeTrack)   = splitKeyframeTrack(clip.volumeTrack,   at: splitOffset, fallback: clip.volume)
-        (left.positionTrack, right.positionTrack) = splitKeyframeTrack(clip.positionTrack, at: splitOffset, fallback: AnimPair(a: 0, b: 0))
-        (left.scaleTrack,    right.scaleTrack)    = splitKeyframeTrack(clip.scaleTrack,    at: splitOffset, fallback: AnimPair(a: 1, b: 1))
-        (left.rotationTrack, right.rotationTrack) = splitKeyframeTrack(clip.rotationTrack, at: splitOffset, fallback: 0)
-        (left.cropTrack,     right.cropTrack)     = splitKeyframeTrack(clip.cropTrack,     at: splitOffset, fallback: clip.crop)
+        // Split each animatable track at the cut, adding a keyframe for continuity.
+        (left.opacityTrack,  right.opacityTrack)  = Self.splitKeyframeTrack(clip.opacityTrack,  at: splitOffset, fallback: clip.opacity)
+        (left.volumeTrack,   right.volumeTrack)   = Self.splitKeyframeTrack(clip.volumeTrack,   at: splitOffset, fallback: clip.volume)
+        (left.positionTrack, right.positionTrack) = Self.splitKeyframeTrack(clip.positionTrack, at: splitOffset, fallback: AnimPair(a: 0, b: 0))
+        (left.scaleTrack,    right.scaleTrack)    = Self.splitKeyframeTrack(clip.scaleTrack,    at: splitOffset, fallback: AnimPair(a: 1, b: 1))
+        (left.rotationTrack, right.rotationTrack) = Self.splitKeyframeTrack(clip.rotationTrack, at: splitOffset, fallback: 0)
+        (left.cropTrack,     right.cropTrack)     = Self.splitKeyframeTrack(clip.cropTrack,     at: splitOffset, fallback: clip.crop)
 
         timeline.tracks[loc.trackIndex].clips[loc.clipIndex] = left
         timeline.tracks[loc.trackIndex].clips.append(right)
@@ -175,7 +173,7 @@ extension EditorViewModel {
     }
 
     /// Splits a keyframe track at splitOffset, keeping both sides continuous. Returns (track, track) if empty.
-    private func splitKeyframeTrack<Value: KeyframeInterpolatable & Codable & Sendable & Equatable>(
+    nonisolated static func splitKeyframeTrack<Value: KeyframeInterpolatable & Codable & Sendable & Equatable>(
         _ track: KeyframeTrack<Value>?, at splitOffset: Int, fallback: Value
     ) -> (left: KeyframeTrack<Value>?, right: KeyframeTrack<Value>?) {
         guard let track, track.isActive else { return (track, track) }
@@ -196,7 +194,7 @@ extension EditorViewModel {
         guard hasMatches else { return }
         let count = timeline.tracks.reduce(0) { $0 + $1.clips.lazy.filter { ids.contains($0.id) }.count }
         selectedClipIds.subtract(ids)
-        withTimelineSwap(actionName: "Remove Clip\(count == 1 ? "" : "s")") {
+        withTimelineSwap(actionName: "Remove Clip\(count == 1 ? "" : "s")", multicamSafe: true) {
             for i in timeline.tracks.indices {
                 timeline.tracks[i].clips.removeAll { ids.contains($0.id) }
             }
@@ -207,7 +205,7 @@ extension EditorViewModel {
     // MARK: - Speed
 
     func applyClipSpeed(clipId: String, newSpeed: Double) {
-        guard let loc = findClip(id: clipId) else { return }
+        guard !refusesMulticamStructureEdit(), let loc = findClip(id: clipId) else { return }
         guard timeline.tracks[loc.trackIndex].clips[loc.clipIndex].supportsRetiming else { return }
         if preDragTimeline == nil {
             preDragTimeline = timeline
@@ -219,6 +217,7 @@ extension EditorViewModel {
     }
 
     func commitClipSpeed(ids: [String], newSpeed: Double) {
+        guard !refusesMulticamStructureEdit() else { return }
         let before: Timeline = preDragTimeline ?? timeline
         for id in ids {
             guard let loc = findClip(id: id) else { continue }
@@ -243,8 +242,9 @@ extension EditorViewModel {
         undoManager?.setActionName(actionName)
     }
 
-    /// Run `work` as a single atomic mutation, registering one timeline-swap undo
-    func withTimelineSwap(actionName: String, refreshVisuals: Bool = true, _ work: () -> Void) {
+    /// Atomically mutate timeline with undo. Set multicamSafe on non-ripple edits.
+    func withTimelineSwap(actionName: String, refreshVisuals: Bool = true, multicamSafe: Bool = false, _ work: () -> Void) {
+        guard multicamSafe || !refusesMulticamStructureEdit() else { return }
         let before = timeline
         undoManager?.disableUndoRegistration()
         work()
