@@ -48,6 +48,12 @@ enum ClipRenderer {
         }
     }
 
+    // Multicam angle segment: carries member's media and trimmed range.
+    struct MulticamSegment {
+        let clip: Clip
+        let label: String
+    }
+
     static func draw(
         _ clip: Clip,
         type: ClipType,
@@ -58,6 +64,8 @@ enum ClipRenderer {
         cache: MediaVisualCache? = nil,
         displayName: String? = nil,
         linkOffset: Int? = nil,
+        multicamSegments: [MulticamSegment]? = nil,
+        multicamBadge: Bool = false,
         fps: Int,
         isMissing: Bool = false,
         isGenerating: Bool = false
@@ -72,7 +80,7 @@ enum ClipRenderer {
 
 
         let colorType = clip.sourceClipType
-        let baseColor = colorType.themeColor
+        let baseColor = multicamBadge ? AppTheme.TrackColor.multicam : colorType.themeColor
         let fill = isSelected
             ? baseColor.withAlphaComponent(0.45)
             : baseColor.withAlphaComponent(0.3)
@@ -94,7 +102,11 @@ enum ClipRenderer {
 
         // --- Draw visual content ---
 
-        if type == .video, let thumbs = cache?.thumbnails(for: clip.mediaRef), !thumbs.isEmpty, mainHeight > 4 {
+        if type != .audio, let segments = multicamSegments, !segments.isEmpty, mainHeight > 4 {
+            let contentRect = CGRect(x: contentX, y: contentY, width: contentWidth, height: mainHeight)
+            drawMulticamSegments(segments, carrier: clip, in: contentRect, clipRect: rect,
+                                 cornerRadius: cornerRadius, cache: cache, fps: fps, context: context)
+        } else if type == .video, let thumbs = cache?.thumbnails(for: clip.mediaRef), !thumbs.isEmpty, mainHeight > 4 {
             let thumbRect = CGRect(x: contentX, y: contentY, width: contentWidth, height: mainHeight)
             drawThumbnailStrip(thumbnails: thumbs, clip: clip, in: thumbRect, clipRect: rect, cornerRadius: cornerRadius, fps: fps, context: context)
         } else if type == .image, let image = cache?.imageThumbnail(for: clip.mediaRef), mainHeight > 4 {
@@ -117,7 +129,7 @@ enum ClipRenderer {
         // Color-coded left edge strip (uses the same source-type as the fill).
         let stripRect = NSRect(x: rect.minX, y: rect.minY, width: stripWidth, height: rect.height)
         let stripPath = CGPath(roundedRect: stripRect, cornerWidth: cornerRadius, cornerHeight: cornerRadius, transform: nil)
-        context.setFillColor(colorType.themeColor.cgColor)
+        context.setFillColor(baseColor.cgColor)
         context.addPath(stripPath)
         context.fillPath()
 
@@ -156,7 +168,8 @@ enum ClipRenderer {
         let showLabel = isSelected || rect.width >= AppTheme.ComponentSize.timelineClipLabelMinWidth
 
         if showLabel {
-            drawLabelBar(clip: clip, type: type, in: labelRect, clipRect: rect, context: context, displayName: displayName, fps: fps)
+            drawLabelBar(clip: clip, type: type, in: labelRect, clipRect: rect, context: context,
+                         displayName: displayName, badge: multicamBadge ? "MULTICAM" : nil, fps: fps)
         }
 
         if showDetailChrome, let linkOffset, linkOffset != 0 {
@@ -222,6 +235,14 @@ enum ClipRenderer {
         in drawRect: NSRect,
         context: CGContext
     ) {
+        var drawRect = drawRect
+        // Negative trim inserts silence at the head.
+        if clip.trimStartFrame < 0, clip.durationFrames > 0 {
+            let lead = CGFloat(Double(-clip.trimStartFrame) / max(clip.speed, 0.0001)) / CGFloat(clip.durationFrames)
+            let inset = min(drawRect.width, lead * drawRect.width)
+            drawRect.origin.x += inset
+            drawRect.size.width -= inset
+        }
         let drawWidth = drawRect.width
         let drawHeight = drawRect.height
         guard drawWidth > 2, drawHeight > 2 else { return }
@@ -229,7 +250,7 @@ enum ClipRenderer {
         // Map visible portion of source to sample indices.
         let totalSource = clip.sourceDurationFrames
         guard totalSource > 0 else { return }
-        let startFrac = Double(clip.trimStartFrame) / Double(totalSource)
+        let startFrac = Double(max(0, clip.trimStartFrame)) / Double(totalSource)
         let endFrac = Double(clip.trimStartFrame + clip.sourceFramesConsumed) / Double(totalSource)
         let sampleStart = max(0, min(samples.count, Int(startFrac * Double(samples.count))))
         let sampleEnd = max(sampleStart, min(samples.count, Int(endFrac * Double(samples.count))))
@@ -599,6 +620,76 @@ enum ClipRenderer {
         context.restoreGState()
     }
 
+    // MARK: - Multicam segments
+
+    /// Each angle segment gets its own filmstrip, a seam line, and an angle badge.
+    private static func drawMulticamSegments(
+        _ segments: [MulticamSegment],
+        carrier: Clip,
+        in contentRect: NSRect,
+        clipRect: NSRect,
+        cornerRadius: CGFloat,
+        cache: MediaVisualCache?,
+        fps: Int,
+        context: CGContext
+    ) {
+        let duration = CGFloat(max(1, carrier.durationFrames))
+        for segment in segments {
+            let x0 = contentRect.minX + CGFloat(segment.clip.startFrame - carrier.startFrame) / duration * contentRect.width
+            let x1 = contentRect.minX + CGFloat(segment.clip.endFrame - carrier.startFrame) / duration * contentRect.width
+            // Each angle draws as its own framed cell — a gap plus border at every cut.
+            let cell = NSRect(x: x0, y: contentRect.minY, width: x1 - x0, height: contentRect.height)
+                .insetBy(dx: 1, dy: 1)
+            guard cell.width > 2 else { continue }
+            let cellPath = CGPath(roundedRect: cell, cornerWidth: 3, cornerHeight: 3, transform: nil)
+
+            if let thumbs = cache?.thumbnails(for: segment.clip.mediaRef), !thumbs.isEmpty {
+                context.saveGState()
+                context.addPath(cellPath)
+                context.clip()
+                drawThumbnailStrip(thumbnails: thumbs, clip: segment.clip, in: cell, clipRect: cell,
+                                   cornerRadius: 3, fps: fps, context: context)
+                context.restoreGState()
+            }
+            context.setStrokeColor(AppTheme.Text.muted.cgColor)
+            context.setLineWidth(1)
+            context.addPath(cellPath)
+            context.strokePath()
+
+            if cell.width >= 40 {
+                drawSegmentBadge(segment.label, in: cell, context: context)
+            }
+        }
+    }
+
+    private static func drawSegmentBadge(_ text: String, in segRect: NSRect, context: CGContext) {
+        drawPill(text, textColor: NSColor.white.withAlphaComponent(0.95),
+                 fill: NSColor.black.withAlphaComponent(AppTheme.Opacity.strong),
+                 at: NSPoint(x: segRect.minX + 3, y: segRect.minY + 3),
+                 maxWidth: segRect.width - 6, context: context)
+    }
+
+    /// Text-in-pill shared by the multicam chip and segment badges. Nil when it doesn't fit.
+    @discardableResult
+    private static func drawPill(_ text: String, textColor: NSColor, fill: NSColor, at origin: NSPoint, maxWidth: CGFloat, context: CGContext) -> NSRect? {
+        guard !text.isEmpty, maxWidth > 16 else { return nil }
+        let str = NSAttributedString(string: text, attributes: [
+            .font: NSFont.systemFont(ofSize: AppTheme.FontSize.xxs, weight: .semibold),
+            .foregroundColor: textColor,
+        ])
+        let size = str.size()
+        let rect = NSRect(x: origin.x, y: origin.y, width: min(size.width + 8, maxWidth), height: size.height + 2)
+        context.saveGState()
+        let path = CGPath(roundedRect: rect, cornerWidth: 3, cornerHeight: 3, transform: nil)
+        context.setFillColor(fill.cgColor)
+        context.addPath(path)
+        context.fillPath()
+        context.clip(to: rect.insetBy(dx: 2, dy: 0))
+        str.draw(at: NSPoint(x: rect.minX + 4, y: rect.minY + 1))
+        context.restoreGState()
+        return rect
+    }
+
     // MARK: - Image Thumbnail (tiled)
 
     private static func drawTiledImage(
@@ -655,8 +746,18 @@ enum ClipRenderer {
 
     // MARK: - Label Bar
 
-    private static func drawLabelBar(clip: Clip, type: ClipType, in labelRect: NSRect, clipRect: NSRect, context: CGContext, displayName: String? = nil, fps: Int) {
+    private static func drawLabelBar(clip: Clip, type: ClipType, in labelRect: NSRect, clipRect: NSRect, context: CGContext, displayName: String? = nil, badge: String? = nil, fps: Int) {
         guard clipRect.width > 20 else { return }
+
+        var labelRect = labelRect
+        if let badge,
+           let chipRect = drawPill(badge, textColor: NSColor.black.withAlphaComponent(0.85),
+                                   fill: AppTheme.TrackColor.multicam,
+                                   at: NSPoint(x: labelRect.minX + 4, y: labelRect.minY + 2),
+                                   maxWidth: labelRect.width - 8, context: context) {
+            labelRect.origin.x = chipRect.maxX + 2
+            labelRect.size.width -= chipRect.width + 6
+        }
 
         let timecode = formatTimecode(frame: clip.durationFrames, fps: fps)
         let rawName = displayName ?? clip.mediaRef
