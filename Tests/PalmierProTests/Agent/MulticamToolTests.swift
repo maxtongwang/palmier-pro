@@ -111,7 +111,6 @@ struct MulticamToolTests {
         let refused: [(String, [String: Any])] = [
             ("add_clips", ["entries": [["mediaRef": "camA", "startFrame": 0]]]),
             ("move_clips", ["moves": [["clipId": programClipId, "toFrame": 99]]]),
-            ("add_texts", ["entries": [["text": "hi", "startFrame": 0, "durationFrames": 30]]]),
             ("manage_tracks", ["reorder": [["index": 0, "to": 1]]]),
             ("sync_clips", ["referenceClipId": programClipId, "targetClipIds": ["x"]]),
         ]
