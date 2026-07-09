@@ -357,6 +357,9 @@ extension ToolExecutor {
     func moveClips(_ editor: EditorViewModel, _ args: [String: Any]) throws -> ToolResult {
         let input: MoveClipsInput = try decodeToolArgs(args, path: "move_clips")
         guard !input.moves.isEmpty else { throw ToolError("Missing or empty 'moves' array") }
+        if input.moves.contains(where: { editor.clipFor(id: $0.clipId)?.multicamGroupId != nil }) {
+            throw ToolError("Multicam clips can't be moved individually — they would drift out of sync with the group. The group shifts together when its whole span ripples.")
+        }
         if let raws = args["moves"] as? [Any] {
             for (idx, raw) in raws.enumerated() {
                 if let d = raw as? [String: Any] {
@@ -459,6 +462,11 @@ extension ToolExecutor {
         for id in clipIds {
             guard let loc = editor.findClip(id: id) else { throw ToolError("Clip not found: \(id)") }
             clipTypes[id] = editor.timeline.tracks[loc.trackIndex].clips[loc.clipIndex].mediaType
+        }
+
+        if clipIds.contains(where: { editor.clipFor(id: $0)?.multicamGroupId != nil }),
+           input.trimStartFrame != nil || input.trimEndFrame != nil || input.durationFrames != nil || input.speed != nil {
+            throw ToolError("Timing fields would slip a multicam clip out of sync — switch angles with change_cam; split/delete and property fields (volume, opacity, transform) stay editable.")
         }
 
         // blendMode applies only to visual (video/image) clips. "normal" clears it.
@@ -893,6 +901,16 @@ extension ToolExecutor {
 
         guard !reorders.isEmpty || !flagSets.isEmpty || !removeIds.isEmpty else {
             throw ToolError("Nothing to do — pass at least one of reorder, set, remove.")
+        }
+
+        let multicamTrackIds = Set(tracks.filter { t in
+            t.clips.contains { $0.multicamGroupId != nil }
+        }.map(\.id))
+        if removeIds.contains(where: { multicamTrackIds.contains($0) }) {
+            throw ToolError("A multicam group's track can't be removed — delete the group's clips first (remove_clips) and the empty track prunes itself.")
+        }
+        if flagSets.contains(where: { multicamTrackIds.contains($0.id) && $0.syncLocked == false }) {
+            throw ToolError("Sync lock stays on for a multicam group's tracks — unlocking would let ripples shift the group's members apart.")
         }
 
         let snapshot = timelineSnapshot(editor)
