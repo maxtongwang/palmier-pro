@@ -60,10 +60,13 @@ enum MulticamEngine {
                     for i in track.clips.indices where isProgramFragment(track.clips[i], group: group)
                         && track.clips[i].startFrame >= target.lowerBound
                         && track.clips[i].endFrame <= target.upperBound {
+                        let wasDefaultFit = track.clips[i].transform == fitTransform(track.clips[i])
+                            && track.clips[i].crop == Crop()
                         rewrite(&track.clips[i], group: group, to: entry.member,
                                 sourceDurations: sourceDurations, fps: fps)
-                        track.clips[i].transform = fitTransform(track.clips[i])
-                        track.clips[i].crop = Crop()
+                        if wasDefaultFit {
+                            track.clips[i].transform = fitTransform(track.clips[i])
+                        }
                         outcome.switched += 1
                     }
                     outcome.merged += joinThroughEdits(track: &track, within: [target], groupId: group.id)

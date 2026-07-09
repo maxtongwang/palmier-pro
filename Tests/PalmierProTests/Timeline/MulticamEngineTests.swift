@@ -198,6 +198,41 @@ struct MulticamTests {
         #expect(clips[1].startFrame == 150)
     }
 
+    @Test func userFramingSurvivesAngleSwitch() throws {
+        let h = harness()
+        let (groupId, _) = try createGroup(h)
+
+        // Cut a fragment out, then punch in on just that fragment.
+        let program = programClips(h, groupId)[0]
+        _ = h.editor.splitClip(clipId: program.id, atFrame: 600)
+        let fragment = programClips(h, groupId).first { $0.startFrame == 600 }!
+        _ = h.editor.splitClip(clipId: fragment.id, atFrame: 1200)
+        var punched = Transform()
+        punched.width = 1.2
+        punched.height = 1.2
+        let framed = programClips(h, groupId).first { $0.startFrame == 600 }!
+        h.editor.mutateClips(ids: [framed.id], actionName: "Frame") {
+            $0.transform = punched
+            $0.crop = Crop(left: 0.1, top: 0, right: 0, bottom: 0)
+        }
+
+        // The punch-in rides the swap; the crop is untouched.
+        _ = try h.editor.switchMulticamAngles(groupId: groupId, requests: [
+            .init(range: 600..<1200, angle: "cam-b"),
+        ])
+        let swapped = programClips(h, groupId).first { $0.startFrame == 600 }!
+        #expect(swapped.mediaRef == "camB")
+        #expect(swapped.transform == punched)
+        #expect(swapped.crop == Crop(left: 0.1, top: 0, right: 0, bottom: 0))
+
+        // An unframed fragment stays at the default fit after switching.
+        _ = try h.editor.switchMulticamAngles(groupId: groupId, requests: [
+            .init(range: 1500..<1800, angle: "cam-b"),
+        ])
+        let plain = programClips(h, groupId).first { $0.startFrame == 1500 }!
+        #expect(plain.crop == Crop())
+    }
+
     @Test func sameAngleSwitchMergesBack() throws {
         let h = harness()
         let (groupId, _) = try createGroup(h)
