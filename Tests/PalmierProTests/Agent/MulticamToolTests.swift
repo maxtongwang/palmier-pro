@@ -137,6 +137,17 @@ struct MulticamToolTests {
         #expect(ToolHarness.textOf(r).contains("sync"))
     }
 
+    @Test func moveWholeGroupAllowed() async throws {
+        let h = harness()
+        let groupId = try await createGroup(h)
+        let clips = h.editor.multicamClips(of: groupId).map(\.clip)
+        let moves = clips.map { ["clipId": $0.id, "toFrame": $0.startFrame + 300] as [String: Any] }
+        let r = await h.runRaw("move_clips", args: ["moves": moves])
+        #expect(r.isError == false)
+        let starts = h.editor.multicamClips(of: groupId).map(\.clip.startFrame).sorted()
+        #expect(starts == clips.map { $0.startFrame + 300 }.sorted())
+    }
+
     @Test func timingFieldsRefusedOnGroupClips() async throws {
         let h = harness()
         let groupId = try await createGroup(h)

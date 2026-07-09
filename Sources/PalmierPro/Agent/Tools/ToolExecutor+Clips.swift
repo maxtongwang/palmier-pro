@@ -357,9 +357,6 @@ extension ToolExecutor {
     func moveClips(_ editor: EditorViewModel, _ args: [String: Any]) throws -> ToolResult {
         let input: MoveClipsInput = try decodeToolArgs(args, path: "move_clips")
         guard !input.moves.isEmpty else { throw ToolError("Missing or empty 'moves' array") }
-        if input.moves.contains(where: { editor.clipFor(id: $0.clipId)?.multicamGroupId != nil }) {
-            throw ToolError("Multicam clips can't be moved individually — they would drift out of sync with the group. The group shifts together when its whole span ripples.")
-        }
         if let raws = args["moves"] as? [Any] {
             for (idx, raw) in raws.enumerated() {
                 if let d = raw as? [String: Any] {
@@ -406,23 +403,28 @@ extension ToolExecutor {
                 seen.insert(pm.clipId)
             }
         }
+
+        var moves: [(clipId: String, toTrack: Int, toFrame: Int)] = []
+        for m in allMoves {
+            guard let loc = editor.findClip(id: m.clipId) else { continue }
+            let currentTrackIdx = loc.trackIndex
+            let currentFrame = editor.timeline.tracks[loc.trackIndex].clips[loc.clipIndex].startFrame
+            let toTrack: Int
+            if let destId = m.destTrackId,
+               let idx = editor.timeline.tracks.firstIndex(where: { $0.id == destId }) {
+                toTrack = idx
+            } else {
+                toTrack = currentTrackIdx
+            }
+            moves.append((clipId: m.clipId, toTrack: toTrack, toFrame: m.toFrame ?? currentFrame))
+        }
+        if let reason = editor.multicamMoveViolation(moves: moves) {
+            throw ToolError(reason)
+        }
+
         let snapshot = timelineSnapshot(editor)
         let moveActionName = parsed.count == 1 ? "Move Clip (Agent)" : "Move Clips (Agent)"
         withUndoGroup(editor, actionName: moveActionName) {
-            var moves: [(clipId: String, toTrack: Int, toFrame: Int)] = []
-            for m in allMoves {
-                guard let loc = editor.findClip(id: m.clipId) else { continue }
-                let currentTrackIdx = loc.trackIndex
-                let currentFrame = editor.timeline.tracks[loc.trackIndex].clips[loc.clipIndex].startFrame
-                let toTrack: Int
-                if let destId = m.destTrackId,
-                   let idx = editor.timeline.tracks.firstIndex(where: { $0.id == destId }) {
-                    toTrack = idx
-                } else {
-                    toTrack = currentTrackIdx
-                }
-                moves.append((clipId: m.clipId, toTrack: toTrack, toFrame: m.toFrame ?? currentFrame))
-            }
             if !moves.isEmpty { editor.moveClips(moves) }
         }
 

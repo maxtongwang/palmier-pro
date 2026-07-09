@@ -84,9 +84,11 @@ extension EditorViewModel {
         guard horizontal || laneChange else { return nil }
         if laneChange { return "Can't move a multicam camera clip to another track — the group's program track stays fixed." }
         for gid in Set(infos.compactMap { $0.0.multicamGroupId }) {
-            guard !Set(multicamClips(of: gid).map { $0.clip.id }).subtracting(movedIds).isEmpty else { continue }
-            let name = multicamGroup(id: gid)?.name ?? "Multicam"
-            return "Can't move part of multicam group \"\(name)\" — its clips stay in sync and move together."
+            let leftBehind = Set(multicamClips(of: gid).map { $0.clip.id }).subtracting(movedIds)
+            if !leftBehind.isEmpty {
+                let name = multicamGroup(id: gid)?.name ?? "Multicam"
+                return "Can't move part of multicam group \"\(name)\" — its clips stay in sync and move together."
+            }
         }
         return nil
     }
