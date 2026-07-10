@@ -77,14 +77,23 @@ final class ScrubAudioEngine {
         if asset != nil { startEngineIfNeeded() }
     }
 
+    func updateAudioMix(_ audioMix: AVAudioMix?) {
+        guard let source else { return }
+        stopScrubbing()
+        sourceGeneration &+= 1
+        cache = nil
+        self.source = Source(asset: source.asset, audioMix: audioMix, generation: sourceGeneration)
+    }
+
     func scrub(to time: CMTime) {
         guard let source, time.isValid else { return }
         let seconds = time.seconds
         guard seconds.isFinite else { return }
 
         let sample = Int64((seconds * Self.sampleRate).rounded())
+        guard sample != lastRequestedSample else { return }
         let direction: Direction
-        if let previous = lastRequestedSample, sample != previous {
+        if let previous = lastRequestedSample {
             direction = sample > previous ? .forward : .reverse
             lastDirection = direction
         } else {

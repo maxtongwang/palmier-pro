@@ -250,7 +250,10 @@ final class VideoEngine {
         )
         currentItem.audioMix = audioMix
         currentItem.videoComposition = videoComposition
-        scrubAudioEngine.configure(asset: currentItem.asset, audioMix: audioMix)
+        scrubAudioEngine.updateAudioMix(audioMix)
+        if editor.isPlaying {
+            scrubAudioEngine.meterPlayback(at: player.currentTime())
+        }
     }
 
     // MARK: - Scopes
