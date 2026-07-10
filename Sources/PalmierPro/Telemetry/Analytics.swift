@@ -82,9 +82,11 @@ enum Analytics {
         PostHogSDK.shared.reset()
     }
 
-    static func capture(_ event: Event, properties: Payload = [:]) {
-        guard didStart, isEnabled else { return }
+    @discardableResult
+    static func capture(_ event: Event, properties: Payload = [:]) -> Bool {
+        guard didStart, isEnabled else { return false }
         PostHogSDK.shared.capture(event.rawValue, properties: cleanedPayload(properties))
+        return true
     }
 
     static func captureProjectActive(projectId: String?, properties: Payload = [:]) {
@@ -97,7 +99,11 @@ enum Analytics {
         guard shouldCapture else { return }
         var payload = properties
         payload["active_day"] = day
-        capture(.projectActive, properties: payload)
+        if !capture(.projectActive, properties: payload) {
+            lock.lock()
+            activeProjectMarks.remove(key)
+            lock.unlock()
+        }
     }
 
     private static var allowedEvents: Set<String> {
