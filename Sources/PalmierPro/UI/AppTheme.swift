@@ -86,13 +86,6 @@ enum AppTheme {
     enum AudioMeter {
         static let panelWidth: CGFloat = 32
         static let barWidth: CGFloat = 8
-        static let scaleGap: CGFloat = 2
-        static let verticalPadding: CGFloat = 6
-        static let segmentHeight: CGFloat = 1
-        static let segmentGap: CGFloat = 1
-        static let peakLineHeight: CGFloat = 1
-        static let minorTickWidth: CGFloat = 2
-        static let majorTickWidth: CGFloat = 4
         static let refreshInterval: Double = 1.0 / 30.0
         static let rulerStepDb: Float = 6
         static let rulerMajorStepDb: Float = 12

@@ -1,17 +1,10 @@
 import Accelerate
 import AVFoundation
 import Foundation
-import Observation
 
 struct AudioMeterAnalysis: Sendable, Equatable {
-    struct Channel: Sendable, Equatable {
-        let peak, rms: Float
-    }
-    let left, right: Channel
-    static let silence = AudioMeterAnalysis(
-        left: Channel(peak: 0, rms: 0),
-        right: Channel(peak: 0, rms: 0)
-    )
+    let leftPeak, rightPeak: Float
+    static let silence = AudioMeterAnalysis(leftPeak: 0, rightPeak: 0)
 }
 
 struct AudioMeterChannelDisplay: Sendable, Equatable {
@@ -36,12 +29,12 @@ struct AudioMeterChannelState: Sendable {
     private var peakHoldUntil: TimeInterval = 0
     private(set) var clipped = false
 
-    mutating func ingest(rms: Float, peak: Float, at time: TimeInterval) {
+    mutating func ingest(peak: Float, at time: TimeInterval) {
         let current = display(at: time)
-        levelDb = max(Self.decibels(rms), current.levelDb)
+        let incomingPeak = Self.decibels(peak)
+        levelDb = max(incomingPeak, current.levelDb)
         levelTime = time
 
-        let incomingPeak = Self.decibels(peak)
         if incomingPeak >= current.peakDb {
             peakDb = incomingPeak
             peakHoldUntil = time + Self.peakHoldSeconds
@@ -68,15 +61,14 @@ struct AudioMeterChannelState: Sendable {
     }
 }
 
-@Observable
 @MainActor
 final class AudioMeterHub {
     private var left = AudioMeterChannelState()
     private var right = AudioMeterChannelState()
 
     func ingest(_ analysis: AudioMeterAnalysis, at time: TimeInterval = ProcessInfo.processInfo.systemUptime) {
-        left.ingest(rms: analysis.left.rms, peak: analysis.left.peak, at: time)
-        right.ingest(rms: analysis.right.rms, peak: analysis.right.peak, at: time)
+        left.ingest(peak: analysis.leftPeak, at: time)
+        right.ingest(peak: analysis.rightPeak, at: time)
     }
     func display(at time: TimeInterval = ProcessInfo.processInfo.systemUptime) -> StereoAudioMeterDisplay {
         StereoAudioMeterDisplay(left: left.display(at: time), right: right.display(at: time))
@@ -96,9 +88,11 @@ enum AudioLevelAnalyzer {
         let upper = min(range.upperBound, min(left.count, right.count))
         let lower = max(0, min(range.lowerBound, upper))
         guard lower < upper else { return .silence }
-        let leftResult = left.withUnsafeBufferPointer { metrics($0.baseAddress! + lower, count: upper - lower) }
-        let rightResult = right.withUnsafeBufferPointer { metrics($0.baseAddress! + lower, count: upper - lower) }
-        return AudioMeterAnalysis(left: leftResult, right: rightResult)
+        let count = upper - lower
+        return AudioMeterAnalysis(
+            leftPeak: left.withUnsafeBufferPointer { peak($0.baseAddress! + lower, count: count) },
+            rightPeak: right.withUnsafeBufferPointer { peak($0.baseAddress! + lower, count: count) }
+        )
     }
 
     nonisolated static func analyze(_ buffer: AVAudioPCMBuffer) -> AudioMeterAnalysis {
@@ -111,16 +105,14 @@ enum AudioLevelAnalyzer {
         let count = Int(buffer.frameLength)
         let right = min(1, Int(buffer.format.channelCount) - 1)
         return AudioMeterAnalysis(
-            left: metrics(channels[0], count: count),
-            right: metrics(channels[right], count: count)
+            leftPeak: peak(channels[0], count: count),
+            rightPeak: peak(channels[right], count: count)
         )
     }
 
-    nonisolated private static func metrics(_ samples: UnsafePointer<Float>, count: Int) -> AudioMeterAnalysis.Channel {
-        var peak: Float = 0
-        var rms: Float = 0
-        vDSP_maxmgv(samples, 1, &peak, vDSP_Length(count))
-        vDSP_rmsqv(samples, 1, &rms, vDSP_Length(count))
-        return AudioMeterAnalysis.Channel(peak: peak, rms: rms)
+    nonisolated private static func peak(_ samples: UnsafePointer<Float>, count: Int) -> Float {
+        var result: Float = 0
+        vDSP_maxmgv(samples, 1, &result, vDSP_Length(count))
+        return result
     }
 }

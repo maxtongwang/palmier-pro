@@ -16,7 +16,6 @@ final class ScrubAudioEngine {
     private struct Request: Sendable {
         let sample: Int64
         let direction: Direction
-        let generation: Int
     }
 
     private struct PCMWindow: Sendable {
@@ -26,10 +25,6 @@ final class ScrubAudioEngine {
         let hasAudioTracks: Bool
 
         var endSample: Int64 { startSample + Int64(left.count) }
-
-        func contains(_ sample: Int64) -> Bool {
-            sample >= startSample && sample < endSample
-        }
     }
 
     nonisolated private static let sampleRate = 48_000.0
@@ -68,21 +63,12 @@ final class ScrubAudioEngine {
         engine.prepare()
     }
 
-    func configure(asset: AVAsset?, audioMix: AVAudioMix?) {
+    func configure(asset: AVAsset?, audioMix: AVAudioMix?, resetMeter: Bool = true) {
         stopScrubbing()
         sourceGeneration &+= 1
         cache = nil
         source = asset.map { Source(asset: $0, audioMix: audioMix, generation: sourceGeneration) }
-        meter.reset()
-        if asset != nil { startEngineIfNeeded() }
-    }
-
-    func updateAudioMix(_ audioMix: AVAudioMix?) {
-        guard let source else { return }
-        stopScrubbing()
-        sourceGeneration &+= 1
-        cache = nil
-        self.source = Source(asset: source.asset, audioMix: audioMix, generation: sourceGeneration)
+        if resetMeter { meter.reset() }
     }
 
     func scrub(to time: CMTime) {
@@ -102,7 +88,7 @@ final class ScrubAudioEngine {
         lastRequestedSample = sample
         latestMeterSample = nil
 
-        let request = Request(sample: sample, direction: direction, generation: source.generation)
+        let request = Request(sample: sample, direction: direction)
         latestRequest = request
         if let cache, canServe(sample: sample, from: cache) {
             play(request: request, from: cache)
@@ -166,14 +152,12 @@ final class ScrubAudioEngine {
             self.pendingDecodeRange = nil
             guard source.generation == self.source?.generation else { return }
             guard let window else {
-                if self.latestRequest?.generation == source.generation {
-                    self.lastRequestedSample = nil
-                }
+                if self.latestRequest != nil { self.lastRequestedSample = nil }
                 return
             }
             self.cache = window
 
-            if let request = self.latestRequest, request.generation == source.generation {
+            if let request = self.latestRequest {
                 if self.canServe(sample: request.sample, from: window) {
                     self.play(request: request, from: window)
                 } else {
@@ -279,12 +263,7 @@ final class ScrubAudioEngine {
         startSample: Int64,
         frameCount: Int
     ) async -> PCMWindow? {
-        let tracks: [AVAssetTrack]
-        do {
-            tracks = try await source.asset.loadTracks(withMediaType: .audio)
-        } catch {
-            return nil
-        }
+        guard let tracks = try? await source.asset.loadTracks(withMediaType: .audio) else { return nil }
 
         var left = [Float](repeating: 0, count: frameCount)
         var right = [Float](repeating: 0, count: frameCount)
@@ -292,12 +271,7 @@ final class ScrubAudioEngine {
             return PCMWindow(startSample: startSample, left: left, right: right, hasAudioTracks: false)
         }
 
-        let reader: AVAssetReader
-        do {
-            reader = try AVAssetReader(asset: source.asset)
-        } catch {
-            return nil
-        }
+        guard let reader = try? AVAssetReader(asset: source.asset) else { return nil }
 
         let output = AVAssetReaderAudioMixOutput(audioTracks: tracks, audioSettings: [
             AVFormatIDKey: kAudioFormatLinearPCM,

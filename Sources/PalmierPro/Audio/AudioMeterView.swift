@@ -4,7 +4,7 @@ struct AudioMeterView: View {
     @Environment(EditorViewModel.self) private var editor
 
     private static let barsWidth = AppTheme.AudioMeter.barWidth * 2
-    private static let contentWidth = barsWidth + AppTheme.AudioMeter.scaleGap + AppTheme.AudioMeter.majorTickWidth
+    private static let contentWidth = barsWidth + AppTheme.Spacing.xxs + AppTheme.Spacing.xs
     private static let rulerMarks = stride(
         from: AudioMeterChannelState.ceilingDb,
         through: AudioMeterChannelState.floorDb,
@@ -28,14 +28,14 @@ struct AudioMeterView: View {
                     context: &context
                 )
 
-                let rulerX = Self.barsWidth + AppTheme.AudioMeter.scaleGap
+                let rulerX = Self.barsWidth + AppTheme.Spacing.xxs
                 for db in Self.rulerMarks {
                     let major = db.truncatingRemainder(dividingBy: AppTheme.AudioMeter.rulerMajorStepDb) == 0
                     fill(
                         CGRect(
                             x: rulerX,
                             y: tickY(for: db, height: size.height),
-                            width: major ? AppTheme.AudioMeter.majorTickWidth : AppTheme.AudioMeter.minorTickWidth,
+                            width: major ? AppTheme.Spacing.xs : AppTheme.BorderWidth.thick,
                             height: AppTheme.BorderWidth.hairline
                         ),
                         color: AppTheme.Text.mutedColor,
@@ -46,7 +46,7 @@ struct AudioMeterView: View {
             .frame(width: Self.contentWidth)
             .frame(maxHeight: .infinity)
             .padding(.horizontal, AppTheme.Spacing.xs)
-            .padding(.vertical, AppTheme.AudioMeter.verticalPadding)
+            .padding(.vertical, AppTheme.Spacing.sm)
             .contentShape(Rectangle())
             .onTapGesture { editor.audioMeter.resetClipping() }
             .help("Reset Clipping Indicators")
@@ -72,8 +72,8 @@ struct AudioMeterView: View {
         height: CGFloat,
         context: inout GraphicsContext
     ) {
-        let gap = AppTheme.AudioMeter.segmentGap
-        let count = max(1, Int((height + gap) / (AppTheme.AudioMeter.segmentHeight + gap)))
+        let gap = AppTheme.BorderWidth.thin
+        let count = max(1, Int((height + gap) / (AppTheme.BorderWidth.thin + gap)))
         let segmentHeight = (height - CGFloat(count - 1) * gap) / CGFloat(count)
         guard segmentHeight > 0 else { return }
         let activeCount = min(count, max(0, Int(ceil(normalized(channel.levelDb) * CGFloat(count)))))
@@ -96,7 +96,7 @@ struct AudioMeterView: View {
         }
 
         guard channel.peakDb > AudioMeterChannelState.floorDb else { return }
-        let lineHeight = AppTheme.AudioMeter.peakLineHeight
+        let lineHeight = AppTheme.BorderWidth.thin
         let y = min(
             height - lineHeight,
             max(0, height * (1 - normalized(channel.peakDb)) - lineHeight / 2)

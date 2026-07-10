@@ -250,7 +250,7 @@ final class VideoEngine {
         )
         currentItem.audioMix = audioMix
         currentItem.videoComposition = videoComposition
-        scrubAudioEngine.updateAudioMix(audioMix)
+        scrubAudioEngine.configure(asset: currentItem.asset, audioMix: audioMix, resetMeter: false)
         if editor.isPlaying {
             scrubAudioEngine.meterPlayback(at: player.currentTime())
         }
