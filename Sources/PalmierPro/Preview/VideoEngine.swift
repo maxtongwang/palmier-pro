@@ -10,6 +10,7 @@ enum PreviewSeekMode: String {
 @MainActor
 final class VideoEngine {
     private(set) var player = AVPlayer()
+    private let scrubAudioEngine = ScrubAudioEngine()
 
     weak var previewView: PreviewNSView?
 
@@ -38,6 +39,7 @@ final class VideoEngine {
         rebuildTask = nil
         compositionCache.removeAll()
         invalidateSeekState()
+        scrubAudioEngine.teardown()
         if let timeObserver { player.removeTimeObserver(timeObserver) }
         timeObserver = nil
     }
@@ -46,6 +48,7 @@ final class VideoEngine {
 
     func play() {
         guard let editor else { return }
+        scrubAudioEngine.stopScrubbing()
         editor.isPlaying = true
         guard rebuildTask == nil else { return }
         let frame = playbackStartFrame(for: editor)
@@ -54,11 +57,13 @@ final class VideoEngine {
     }
 
     func pause() {
+        scrubAudioEngine.stopScrubbing()
         editor?.isPlaying = false
         player.pause()
     }
 
     func resumePlayback() {
+        scrubAudioEngine.stopScrubbing()
         editor?.isPlaying = true
         player.play()
     }
@@ -77,9 +82,11 @@ final class VideoEngine {
 
         switch mode {
         case .exact:
+            scrubAudioEngine.stopScrubbing()
             cancelInteractiveSeek()
             performSeek(time: time, tolerance: tolerance)
         case .interactiveScrub:
+            scrubAudioEngine.scrub(to: time)
             enqueueInteractiveSeek(time: time, tolerance: tolerance)
         }
     }
@@ -126,6 +133,7 @@ final class VideoEngine {
 
     private func replacePlayerItem(_ item: AVPlayerItem?, reason: String) {
         invalidateSeekState()
+        scrubAudioEngine.configure(asset: item?.asset, audioMix: item?.audioMix)
         player.replaceCurrentItem(with: item)
         Log.preview.debug("seek state invalidated reason=\(reason)")
     }
@@ -241,6 +249,7 @@ final class VideoEngine {
         )
         currentItem.audioMix = audioMix
         currentItem.videoComposition = videoComposition
+        scrubAudioEngine.configure(asset: currentItem.asset, audioMix: audioMix)
     }
 
     // MARK: - Scopes
