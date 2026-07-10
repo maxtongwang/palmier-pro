@@ -147,7 +147,7 @@ final class ScrubAudioEngine {
     }
 
     private func requestWindow(around sample: Int64, source: Source) {
-        if let pendingDecodeRange, pendingDecodeRange.contains(sample) { return }
+        if let pendingDecodeRange, canServe(sample: sample, from: pendingDecodeRange) { return }
 
         decodeTask?.cancel()
         let halfWindow = Int64(Self.cacheFrameCount / 2)
@@ -164,7 +164,13 @@ final class ScrubAudioEngine {
             guard !Task.isCancelled, let self else { return }
             self.decodeTask = nil
             self.pendingDecodeRange = nil
-            guard source.generation == self.source?.generation, let window else { return }
+            guard source.generation == self.source?.generation else { return }
+            guard let window else {
+                if self.latestRequest?.generation == source.generation {
+                    self.lastRequestedSample = nil
+                }
+                return
+            }
             self.cache = window
 
             if let request = self.latestRequest, request.generation == source.generation {
@@ -201,9 +207,13 @@ final class ScrubAudioEngine {
     }
 
     private func canServe(sample: Int64, from window: PCMWindow) -> Bool {
+        canServe(sample: sample, from: window.startSample..<window.endSample)
+    }
+
+    private func canServe(sample: Int64, from range: Range<Int64>) -> Bool {
         let halfGrain = Int64(Self.grainFrameCount / 2)
-        let hasLeftContext = window.startSample == 0 || sample - halfGrain >= window.startSample
-        return window.contains(sample) && hasLeftContext && sample + halfGrain < window.endSample
+        let hasLeftContext = range.lowerBound == 0 || sample - halfGrain >= range.lowerBound
+        return range.contains(sample) && hasLeftContext && sample + halfGrain < range.upperBound
     }
 
     private func canMeter(sample: Int64, from window: PCMWindow) -> Bool {
