@@ -12,6 +12,7 @@ struct AIEditTab: View {
     @State private var placeAudioOnTimeline: Bool = true
     @State private var aiEnhanceExpanded: Bool = true
     @State private var aiAudioExpanded: Bool = true
+    @State private var selectedDubbingLanguage: String = ""
 
     init(asset: MediaAsset, clipId: String? = nil) {
         self.asset = asset
@@ -23,47 +24,55 @@ struct AIEditTab: View {
             VStack(alignment: .leading, spacing: AppTheme.Spacing.xl) {
                 if hasScopeToggles {
                     InspectorSection("Scope", contentSpacing: AppTheme.Spacing.smMd) {
-                        if clipId != nil { replaceToggle }
+                        if isVisualClipContext, clipId != nil { replaceToggle }
                         if trimmedClipAvailable { trimmedClipToggle }
                     }
                 }
 
-                InspectorSection("AI Enhance", isExpanded: $aiEnhanceExpanded, contentSpacing: AppTheme.Spacing.smMd) {
-                    actionRow(
-                        action: .upscale,
-                        icon: "sparkles.rectangle.stack",
-                        title: "Upscale",
-                        description: "Enhance resolution with AI"
-                    )
-                    actionRow(
-                        action: .edit,
-                        icon: "wand.and.stars",
-                        title: "Edit",
-                        description: "Transform with a prompt or motion reference"
-                    )
-                    actionRow(
-                        action: .rerun,
-                        icon: "arrow.clockwise",
-                        title: "Rerun",
-                        description: rerunDescription
-                    )
-                    if asset.type == .image {
+                if isVisualClipContext {
+                    InspectorSection("AI Enhance", isExpanded: $aiEnhanceExpanded, contentSpacing: AppTheme.Spacing.smMd) {
                         actionRow(
-                            action: .createVideo,
-                            icon: "video.badge.plus",
-                            title: "Create Video",
-                            description: "Use as first frame or reference"
+                            action: .upscale,
+                            icon: "sparkles.rectangle.stack",
+                            title: "Upscale",
+                            description: "Enhance resolution with AI"
                         )
+                        actionRow(
+                            action: .edit,
+                            icon: "wand.and.stars",
+                            title: "Edit",
+                            description: "Transform with a prompt or motion reference"
+                        )
+                        actionRow(
+                            action: .rerun,
+                            icon: "arrow.clockwise",
+                            title: "Rerun",
+                            description: rerunDescription
+                        )
+                        if asset.type == .image {
+                            actionRow(
+                                action: .createVideo,
+                                icon: "video.badge.plus",
+                                title: "Create Video",
+                                description: "Use as first frame or reference"
+                            )
+                        }
                     }
                 }
 
-                if asset.type == .video {
+                if asset.type == .video || asset.type == .audio {
                     InspectorSection("AI Audio", isExpanded: $aiAudioExpanded, contentSpacing: AppTheme.Spacing.smMd) {
                         if showsAudioOutputOptions {
                             audioPlacementToggle
                         }
-                        videoAudioActionRow(kind: .music)
-                        videoAudioActionRow(kind: .sfx)
+                        if clipId != nil {
+                            audioTransformActionRow(kind: .cleanup)
+                            audioTransformActionRow(kind: .dubbing)
+                        }
+                        if isVisualClipContext, asset.type == .video {
+                            videoAudioActionRow(kind: .music)
+                            videoAudioActionRow(kind: .sfx)
+                        }
                     }
                 }
             }
@@ -82,11 +91,15 @@ struct AIEditTab: View {
     }
 
     private var hasScopeToggles: Bool {
-        clipId != nil || trimmedClipAvailable
+        (isVisualClipContext && clipId != nil) || trimmedClipAvailable
     }
 
     private var showsAudioOutputOptions: Bool {
-        asset.type == .video && clipId != nil
+        (asset.type == .video || asset.type == .audio) && clipId != nil
+    }
+
+    private var isVisualClipContext: Bool {
+        timelineClip?.mediaType.isVisual ?? asset.type.isVisual
     }
 
     private var rerunDescription: String {
@@ -157,19 +170,13 @@ struct AIEditTab: View {
     }
 
     private var trimmedClipAvailable: Bool {
-        guard asset.type == .video, let clip = timelineClip else { return false }
-        return clip.trimStartFrame > 0 || clip.trimEndFrame > 0
+        guard let clipId else { return false }
+        return editor.aiEditTrimmedSource(clipId: clipId) != nil
     }
 
     private func trimmedSourceIfEnabled() -> TrimmedSource? {
-        guard trimmedClipAvailable, useTrimmedClip, let clip = timelineClip else { return nil }
-        return TrimmedSource(
-            sourceURL: asset.url,
-            trimStartFrame: clip.trimStartFrame,
-            trimEndFrame: clip.trimEndFrame,
-            sourceFramesConsumed: clip.sourceFramesConsumed,
-            fps: editor.timeline.fps
-        )
+        guard useTrimmedClip, let clipId else { return nil }
+        return editor.aiEditTrimmedSource(clipId: clipId)
     }
 
     private var effectiveDurationForAvailability: Double? {
@@ -191,9 +198,79 @@ struct AIEditTab: View {
             effectiveDurationOverride: effectiveDurationForAvailability
         )
         let paidBlocked = (action == .upscale || action == .edit) && !account.isPaid
-        let isEnabled = availability.isAvailable && !paidBlocked
-        let disabledReason = paidBlocked ? "Requires a paid plan" : availability.reason
+        let isEnabled = availability.isAvailable && !paidBlocked && aiDisabledReason == nil
+        let disabledReason = aiDisabledReason
+            ?? (paidBlocked ? "Requires a paid plan" : availability.reason)
 
+        descriptiveActionRow(
+            icon: icon,
+            title: title,
+            description: description,
+            isEnabled: isEnabled,
+            disabledReason: disabledReason
+        ) {
+            actionTrigger(action: action, title: triggerTitle ?? title, isEnabled: isEnabled)
+        }
+    }
+
+    private func videoAudioActionRow(kind: VideoToAudioEditKind) -> some View {
+        actionRow(
+            action: kind.action,
+            icon: kind.iconName,
+            title: kind.title,
+            description: kind.description,
+            triggerTitle: "Generate"
+        )
+    }
+
+    @ViewBuilder
+    private func audioTransformActionRow(kind: AudioTransformEditKind) -> some View {
+        let model = kind.model
+        let availability = kind.availability(
+            for: asset,
+            effectiveDurationOverride: effectiveDurationForAvailability
+        )
+        let paidBlocked = model?.paidOnly == true && !account.isPaid
+        let isEnabled = availability.isAvailable && !paidBlocked && aiDisabledReason == nil
+        let disabledReason = aiDisabledReason
+            ?? (paidBlocked ? "Requires a paid plan" : availability.reason)
+        let duration = max(
+            1,
+            Int((effectiveDurationForAvailability ?? asset.duration).rounded())
+        )
+        let cost = model.flatMap {
+            CostEstimator.audioCost(model: $0, prompt: "", durationSeconds: duration)
+        }
+
+        descriptiveActionRow(
+            icon: kind.iconName,
+            title: kind.title,
+            description: audioTransformDescription(kind: kind, model: model, cost: cost),
+            isEnabled: isEnabled,
+            disabledReason: disabledReason
+        ) {
+            HStack(spacing: AppTheme.Spacing.xs) {
+                if kind == .dubbing, let model {
+                    dubbingLanguageMenu(model: model)
+                }
+                Button(kind.actionTitle) {
+                    runAudioTransform(kind)
+                }
+                .buttonStyle(.capsule(.secondary))
+                .controlSize(.small)
+            }
+            .disabled(!isEnabled)
+        }
+    }
+
+    private func descriptiveActionRow<Trailing: View>(
+        icon: String,
+        title: String,
+        description: String,
+        isEnabled: Bool,
+        disabledReason: String?,
+        @ViewBuilder trailing: () -> Trailing
+    ) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: AppTheme.Spacing.sm) {
             Image(systemName: icon)
                 .font(.system(size: AppTheme.FontSize.md))
@@ -208,20 +285,72 @@ struct AIEditTab: View {
                     .foregroundStyle(disabledReason != nil ? AppTheme.Text.secondaryColor : AppTheme.Text.tertiaryColor)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            Spacer(minLength: AppTheme.Spacing.sm)
-            actionTrigger(action: action, title: triggerTitle ?? title, isEnabled: isEnabled)
+            Spacer(minLength: AppTheme.Spacing.xs)
+            trailing()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .help(disabledReason ?? "")
     }
 
-    private func videoAudioActionRow(kind: VideoToAudioEditKind) -> some View {
-        actionRow(
-            action: kind.action,
-            icon: kind.iconName,
-            title: kind.title,
-            description: kind.description,
-            triggerTitle: "Generate"
+    private func audioTransformDescription(
+        kind: AudioTransformEditKind,
+        model: AudioModelConfig?,
+        cost: Int?
+    ) -> String {
+        let action: String
+        switch kind {
+        case .cleanup:
+            action = "Remove background sound and keep speech"
+        case .dubbing:
+            let code = model.map(resolvedDubbingLanguage) ?? ""
+            action = "Translate speech to \(AudioModelConfig.languageName(code))"
+        }
+        return "\(action) · \(CostEstimator.format(cost))"
+    }
+
+    private func dubbingLanguageMenu(model: AudioModelConfig) -> some View {
+        let selected = resolvedDubbingLanguage(model)
+        return Menu {
+            ForEach(model.targetLanguages ?? [], id: \.self) { code in
+                Button(AudioModelConfig.languageName(code)) {
+                    selectedDubbingLanguage = code
+                }
+            }
+        } label: {
+            Text(selected.uppercased())
+                .font(.system(size: AppTheme.FontSize.xs, weight: .medium))
+                .foregroundStyle(AppTheme.Text.secondaryColor)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .controlSize(.small)
+        .help("Target language: \(AudioModelConfig.languageName(selected))")
+        .accessibilityLabel("Target language")
+        .accessibilityValue(AudioModelConfig.languageName(selected))
+        .hoverHighlight(cornerRadius: AppTheme.Radius.sm)
+    }
+
+    private func resolvedDubbingLanguage(_ model: AudioModelConfig) -> String {
+        let allowed = model.targetLanguages ?? []
+        if allowed.contains(selectedDubbingLanguage) { return selectedDubbingLanguage }
+        if let defaultLanguage = model.defaultTargetLanguage,
+           allowed.contains(defaultLanguage) {
+            return defaultLanguage
+        }
+        return allowed.first ?? ""
+    }
+
+    private func runAudioTransform(_ kind: AudioTransformEditKind) {
+        guard let model = kind.model else { return }
+        let targetLanguage = kind == .dubbing ? resolvedDubbingLanguage(model) : nil
+        _ = EditSubmitter.submitAudioTransform(
+            asset: asset,
+            kind: kind,
+            targetLanguage: targetLanguage,
+            editor: editor,
+            trimmedSource: trimmedSourceIfEnabled(),
+            placement: pendingAudioPlacement(actionName: kind.timelineActionName)
         )
     }
 
@@ -241,8 +370,8 @@ struct AIEditTab: View {
             .menuStyle(.borderlessButton)
             .fixedSize()
             .controlSize(.small)
-            .disabled(!isEnabled || !account.aiAllowed)
-            .help(account.aiAllowed ? "" : "Sign in to upscale")
+            .hoverHighlight(cornerRadius: AppTheme.Radius.sm)
+            .disabled(!isEnabled)
         case .createVideo:
             Menu(title) {
                 Button("Set as first frame") { sendToVideo(asReference: false) }
@@ -251,6 +380,7 @@ struct AIEditTab: View {
             .menuStyle(.borderlessButton)
             .fixedSize()
             .controlSize(.small)
+            .hoverHighlight(cornerRadius: AppTheme.Radius.sm)
             .disabled(!isEnabled)
         case .edit, .generateMusic, .generateSFX, .rerun:
             Button(title) {
@@ -323,14 +453,10 @@ struct AIEditTab: View {
     }
 
     private func pendingAudioPlacement(actionName: String) -> PendingAudioPlacement? {
-        guard placeAudioOnTimeline, let clip = timelineClip else { return nil }
-        let spanSeconds = trimmedSourceIfEnabled()?.durationSeconds
-            ?? (asset.duration > 0
-                ? asset.duration
-                : Double(clip.durationFrames) / Double(max(1, editor.timeline.fps)))
-        return PendingAudioPlacement(
-            startFrame: clip.startFrame,
-            spanSeconds: max(spanSeconds, 1 / Double(max(1, editor.timeline.fps))),
+        guard placeAudioOnTimeline, let clipId else { return nil }
+        return editor.aiAudioPlacement(
+            clipId: clipId,
+            trimmedSource: trimmedSourceIfEnabled(),
             actionName: actionName
         )
     }
@@ -353,6 +479,12 @@ struct AIEditTab: View {
     }
 
     private var shouldReplace: Bool { replaceClipSource && clipId != nil }
+
+    private var aiDisabledReason: String? {
+        if account.isMisconfigured { return "AI is unavailable" }
+        if !account.isSignedIn { return "Sign in to use AI" }
+        return nil
+    }
 
     private func markReplacementPendingIfNeeded() {
         guard shouldReplace, let clipId else { return }
