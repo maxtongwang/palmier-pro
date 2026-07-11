@@ -82,6 +82,15 @@ extension GenerationView {
         selectedType != .audio || audioModel.inputs.contains(.text)
     }
 
+    var initialAudioTargetLanguage: String {
+        guard let languages = audioModel.targetLanguages else { return "" }
+        if let preferred = audioModel.defaultTargetLanguage,
+           languages.contains(preferred) {
+            return preferred
+        }
+        return languages.first ?? ""
+    }
+
     var hasAnySettings: Bool {
         switch selectedType {
         case .video: return !videoModel.durations.isEmpty || !videoModel.aspectRatios.isEmpty || videoModel.resolutions != nil || videoModel.audioDiscountRate != nil

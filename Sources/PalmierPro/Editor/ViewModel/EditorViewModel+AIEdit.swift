@@ -67,18 +67,26 @@ extension EditorViewModel {
         seedGenerationPanel(asset: asset, stored: stored, trimmedSource: trim, audioPlacement: placement)
     }
 
-    func beginAIAudioTransform(clipId: String, kind: AudioTransformEditKind) {
+    func beginAIAudioTransform(
+        clipId: String,
+        kind: AudioTransformEditKind,
+        useTrimmedClip: Bool = true,
+        placeOnTimeline: Bool = true
+    ) {
         guard let (_, asset) = aiEditClipAsset(clipId) else { return }
-        let trim = aiEditTrimmedSource(clipId: clipId)
-        guard let placement = aiAudioPlacement(
-            clipId: clipId,
-            trimmedSource: trim,
-            actionName: kind.timelineActionName
-        ) else { return }
+        let trim = useTrimmedClip ? aiEditTrimmedSource(clipId: clipId) : nil
+        let placement = placeOnTimeline
+            ? aiAudioPlacement(
+                clipId: clipId,
+                trimmedSource: trim,
+                actionName: kind.timelineActionName
+            )
+            : nil
+        if placeOnTimeline && placement == nil { return }
         guard let stored = EditSubmitter.audioTransformSeed(
             for: asset,
             kind: kind,
-            durationOverride: placement.spanSeconds
+            durationOverride: placement?.spanSeconds ?? trim?.durationSeconds
         ) else { return }
         seedGenerationPanel(
             asset: asset,

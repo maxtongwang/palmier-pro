@@ -6,19 +6,18 @@ enum AudioTransformEditKind: CaseIterable, Equatable {
 
     private typealias Copy = (
         title: String,
-        action: String,
+        description: String,
         menu: String,
         icon: String,
-        suffix: String,
         timelineAction: String
     )
 
     private var copy: Copy {
         switch self {
         case .cleanup:
-            ("Voice Cleanup", "Clean Up", "Clean Up Voice…", "waveform", "Cleaned", "Add Cleaned Voice")
+            ("Voice Cleanup", "Remove background sound and keep speech", "Clean Up Voice…", "waveform", "Add Cleaned Voice")
         case .dubbing:
-            ("Dubbing", "Generate", "Dub…", "globe", "Dubbed", "Add Dubbed Voice")
+            ("Dubbing", "Translate speech into another language", "Dub…", "globe", "Add Dubbed Voice")
         }
     }
 
@@ -30,10 +29,9 @@ enum AudioTransformEditKind: CaseIterable, Equatable {
     }
 
     var title: String { copy.title }
-    var actionTitle: String { copy.action }
+    var description: String { copy.description }
     var menuTitle: String { copy.menu }
     var iconName: String { copy.icon }
-    var outputSuffix: String { copy.suffix }
     var timelineActionName: String { copy.timelineAction }
 
     @MainActor

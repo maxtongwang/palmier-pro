@@ -12,7 +12,6 @@ struct AIEditTab: View {
     @State private var placeAudioOnTimeline: Bool = true
     @State private var aiEnhanceExpanded: Bool = true
     @State private var aiAudioExpanded: Bool = true
-    @State private var selectedDubbingLanguage: String = ""
 
     init(asset: MediaAsset, clipId: String? = nil) {
         self.asset = asset
@@ -234,31 +233,19 @@ struct AIEditTab: View {
         let isEnabled = availability.isAvailable && !paidBlocked && aiDisabledReason == nil
         let disabledReason = aiDisabledReason
             ?? (paidBlocked ? "Requires a paid plan" : availability.reason)
-        let duration = max(
-            1,
-            Int((effectiveDurationForAvailability ?? asset.duration).rounded())
-        )
-        let cost = model.flatMap {
-            CostEstimator.audioCost(model: $0, prompt: "", durationSeconds: duration)
-        }
 
         descriptiveActionRow(
             icon: kind.iconName,
             title: kind.title,
-            description: audioTransformDescription(kind: kind, model: model, cost: cost),
+            description: kind.description,
             isEnabled: isEnabled,
             disabledReason: disabledReason
         ) {
-            HStack(spacing: AppTheme.Spacing.xs) {
-                if kind == .dubbing, let model {
-                    dubbingLanguageMenu(model: model)
-                }
-                Button(kind.actionTitle) {
-                    runAudioTransform(kind)
-                }
-                .buttonStyle(.capsule(.secondary))
-                .controlSize(.small)
+            Button("Generate") {
+                presentAudioTransform(kind)
             }
+            .buttonStyle(.capsule(.secondary))
+            .controlSize(.small)
             .disabled(!isEnabled)
         }
     }
@@ -292,65 +279,13 @@ struct AIEditTab: View {
         .help(disabledReason ?? "")
     }
 
-    private func audioTransformDescription(
-        kind: AudioTransformEditKind,
-        model: AudioModelConfig?,
-        cost: Int?
-    ) -> String {
-        let action: String
-        switch kind {
-        case .cleanup:
-            action = "Remove background sound and keep speech"
-        case .dubbing:
-            let code = model.map(resolvedDubbingLanguage) ?? ""
-            action = "Translate speech to \(AudioModelConfig.languageName(code))"
-        }
-        return "\(action) · \(CostEstimator.format(cost))"
-    }
-
-    private func dubbingLanguageMenu(model: AudioModelConfig) -> some View {
-        let selected = resolvedDubbingLanguage(model)
-        return Menu {
-            ForEach(model.targetLanguages ?? [], id: \.self) { code in
-                Button(AudioModelConfig.languageName(code)) {
-                    selectedDubbingLanguage = code
-                }
-            }
-        } label: {
-            Text(selected.uppercased())
-                .font(.system(size: AppTheme.FontSize.xs, weight: .medium))
-                .foregroundStyle(AppTheme.Text.secondaryColor)
-        }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .controlSize(.small)
-        .help("Target language: \(AudioModelConfig.languageName(selected))")
-        .accessibilityLabel("Target language")
-        .accessibilityValue(AudioModelConfig.languageName(selected))
-        .hoverHighlight(cornerRadius: AppTheme.Radius.sm)
-    }
-
-    private func resolvedDubbingLanguage(_ model: AudioModelConfig) -> String {
-        let allowed = model.targetLanguages ?? []
-        if allowed.contains(selectedDubbingLanguage) { return selectedDubbingLanguage }
-        if let defaultLanguage = model.defaultTargetLanguage,
-           allowed.contains(defaultLanguage) {
-            return defaultLanguage
-        }
-        return allowed.first ?? ""
-    }
-
-    private func runAudioTransform(_ kind: AudioTransformEditKind) {
-        guard let model = kind.model else { return }
-        let targetLanguage = kind == .dubbing ? resolvedDubbingLanguage(model) : nil
-        _ = EditSubmitter.submitAudioTransform(
-            asset: asset,
+    private func presentAudioTransform(_ kind: AudioTransformEditKind) {
+        guard let clipId else { return }
+        editor.beginAIAudioTransform(
+            clipId: clipId,
             kind: kind,
-            targetLanguage: targetLanguage,
-            editor: editor,
-            trimmedSource: trimmedSourceIfEnabled(),
-            placement: pendingAudioPlacement(actionName: kind.timelineActionName)
+            useTrimmedClip: useTrimmedClip,
+            placeOnTimeline: placeAudioOnTimeline
         )
     }
 

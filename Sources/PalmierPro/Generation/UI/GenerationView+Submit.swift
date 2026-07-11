@@ -403,8 +403,11 @@ extension GenerationView {
         }
         if let n = stored.numImages { selectedNumImages = max(1, n) }
         if let v = stored.voice, !v.isEmpty { selectedVoice = v }
-        if let language = stored.targetLanguage, !language.isEmpty {
+        if let language = stored.targetLanguage,
+           audioModel.targetLanguages?.contains(language) == true {
             selectedTargetLanguage = language
+        } else if selectedType == .audio {
+            selectedTargetLanguage = initialAudioTargetLanguage
         }
         lyrics = stored.lyrics ?? ""
         styleInstructions = stored.styleInstructions ?? ""
@@ -456,7 +459,7 @@ extension GenerationView {
     func resetAudioState() {
         let model = audioModel
         selectedVoice = model.defaultVoice ?? ""
-        selectedTargetLanguage = model.defaultTargetLanguage ?? ""
+        selectedTargetLanguage = initialAudioTargetLanguage
         if !model.supportsLyrics { lyrics = "" }
         if !model.supportsStyleInstructions { styleInstructions = "" }
         if !model.supportsInstrumental { instrumental = false }

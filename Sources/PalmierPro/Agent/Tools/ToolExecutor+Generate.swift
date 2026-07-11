@@ -298,7 +298,7 @@ extension ToolExecutor {
             videoURL: videoURL,
             sourceURL: nil,
             targetLanguage: model.targetLanguages != nil
-                ? (args.string("targetLanguage") ?? model.defaultTargetLanguage) : nil
+                ? args.string("targetLanguage") : nil
         )
         if let err = model.validate(params: params) {
             throw ToolError(err)
@@ -508,9 +508,6 @@ extension ToolExecutor {
         }
         if let targetLanguages = m.targetLanguages {
             info["targetLanguages"] = targetLanguages
-        }
-        if let defaultTargetLanguage = m.defaultTargetLanguage {
-            info["defaultTargetLanguage"] = defaultTargetLanguage
         }
         return info
     }
