@@ -64,6 +64,14 @@ struct AIEditTab: View {
                         if showsAudioOutputOptions {
                             audioPlacementToggle
                         }
+                        if asset.type == .audio {
+                            actionRow(
+                                action: .rerun,
+                                icon: "arrow.clockwise",
+                                title: "Rerun",
+                                description: rerunDescription
+                            )
+                        }
                         if clipId != nil {
                             audioTransformActionRow(kind: .cleanup)
                             audioTransformActionRow(kind: .dubbing)

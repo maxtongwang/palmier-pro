@@ -129,7 +129,7 @@ struct AudioModelConfig: Identifiable, Sendable {
 
     func validate(params: AudioGenerationParams) -> String? {
         let promptLen = params.prompt.trimmingCharacters(in: .whitespaces).count
-        if promptLen < minPromptLength {
+        if inputs.contains(.text), promptLen < minPromptLength {
             return "\(displayName) requires prompt ≥ \(minPromptLength) characters (got \(promptLen))."
         }
         if let allowed = voices, let v = params.voice, !v.isEmpty, !allowed.contains(v) {

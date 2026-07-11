@@ -287,7 +287,11 @@ extension ToolExecutor {
         }
 
         let instrumental = args.bool("instrumental") ?? false
-        let durationSeconds = spanSeconds.map { max(1, Int($0.rounded())) } ?? args.int("duration")
+        let requestedDurationSeconds = args.int("duration")
+        let sourceDurationSeconds = spanSeconds.map { max(1, Int($0.rounded())) }
+        let durationSeconds = model.usesSourceURL
+            ? sourceDurationSeconds
+            : (requestedDurationSeconds ?? sourceDurationSeconds)
         let params = AudioGenerationParams(
             prompt: prompt,
             voice: model.voices != nil ? (args.string("voice") ?? model.defaultVoice) : nil,
@@ -331,7 +335,8 @@ extension ToolExecutor {
             references: references
         )
 
-        if let startFrame = placementStartFrame, let span = spanSeconds {
+        if let startFrame = placementStartFrame, let sourceSpan = spanSeconds {
+            let outputSpan = requestedDurationSeconds.map(Double.init) ?? sourceSpan
             let placeholderId = submission.submit(
                 service: editor.generationService,
                 projectURL: editor.projectURL,
@@ -342,7 +347,7 @@ extension ToolExecutor {
             )
             editor.placeGeneratingAudioClip(
                 placeholderId: placeholderId, startFrame: startFrame,
-                spanSeconds: span, actionName: "Add \(model.category.label)"
+                spanSeconds: outputSpan, actionName: "Add \(model.category.label)"
             )
             return .ok("Generation started and placed on the timeline at frame \(startFrame). Placeholder asset ID: \(placeholderId). Model: \(model.displayName), \(model.category.label) (scored from video).")
         }

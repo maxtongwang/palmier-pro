@@ -18,7 +18,9 @@ extension GenerationView {
         }
         if selectedType == .audio {
             if audioModel.acceptsSourceMedia {
-                return audioSource != nil
+                guard audioSource != nil else { return false }
+                guard let languages = audioModel.targetLanguages else { return true }
+                return languages.contains(selectedTargetLanguage)
             }
             return trimmedPrompt.count >= audioModel.minPromptLength
         }
