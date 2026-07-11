@@ -249,6 +249,9 @@ extension ToolExecutor {
             guard model.acceptsSource(candidate.type) else {
                 throw ToolError("Model '\(model.id)' does not accept \(candidate.type.rawValue) source media.")
             }
+            if model.usesSourceURL, candidate.type == .video, !candidate.hasAudio {
+                throw ToolError("\(model.displayName) requires source video with an audio track.")
+            }
             if let err = model.validate(spanSeconds: candidate.duration) {
                 throw ToolError(err)
             }
