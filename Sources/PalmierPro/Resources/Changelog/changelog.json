@@ -2,14 +2,21 @@
   "changelogURL": "https://github.com/palmier-io/palmier-pro/releases",
   "entries": [
     {
-      "version": "0.6.4",
-      "date": "2026-07-09",
+      "version": "0.6.5",
+      "date": "2026-07-10",
       "sections": [
         {
           "heading": "New",
           "items": [
-            "Multicam editing: Agent can now work with multiple camera footage with better tools. Especially useful for podcast or other multi-camera setups.",
-            "10-bit HDR export: New HEVC 10-bit HDR export option."
+            "New ElevenLabs models: ElevenLabs SFX, Voice Isolator, Dubbing.",
+            "Audio scrubbing: + timeline meter: audio per frame scrubbing and a stereo dBFS meter for monitoring audio levels."
+          ]
+        },
+        {
+          "heading": "Fixed",
+          "items": [
+            "65-point .cube LUTs: Support 65-point .cube LUTs for color grading.",
+            "Chroma key eyedropper: Fix chroma key issue and add a more precise eyedropper."
           ]
         }
       ]
