@@ -30,7 +30,7 @@ struct ExportProjectToolTests {
         #expect(ToolHarness.textOf(emptyTimeline).contains("timeline is empty"))
     }
 
-    @Test func handlesDestinationsAndExportGate() async throws {
+    @Test func handlesDestinationsAndQueue() async throws {
         let h = ToolHarness(timeline: Fixtures.timeline(tracks: [
             Fixtures.videoTrack(clips: [Fixtures.clip(mediaRef: "missing", start: 0, duration: 30)]),
         ]))
@@ -60,28 +60,35 @@ struct ExportProjectToolTests {
         defer { try? FileManager.default.removeItem(at: uniqueURL) }
         #expect(uniqueURL.deletingLastPathComponent().standardizedFileURL == downloads.standardizedFileURL)
         #expect(uniqueURL.lastPathComponent == "\(base) 2.xml")
-
-        await ExportCoordinator.acquireExport()
-        defer { ExportCoordinator.endExport() }
+        try await waitForJob(from: unique, in: h.exportQueue)
 
         let uiActiveXML = FileManager.default.temporaryDirectory
             .appendingPathComponent("export-tool-ui-active-\(UUID().uuidString).xml")
         defer { try? FileManager.default.removeItem(at: uiActiveXML) }
-        let uiActiveXMLResult = await h.runRaw("export_project", args: [
+        let uiActiveXMLResult = try await h.runOK("export_project", args: [
             "mode": "xml",
             "outputPath": uiActiveXML.path,
-        ])
-        #expect(!uiActiveXMLResult.isError)
+        ]) as? [String: Any]
+        try await waitForJob(from: uiActiveXMLResult, in: h.exportQueue)
         #expect(FileManager.default.fileExists(atPath: uiActiveXML.path))
 
+        let blocker = try h.exportQueue.enqueueForTesting(
+            outputURL: FileManager.default.temporaryDirectory.appendingPathComponent("export-blocker-\(UUID().uuidString).mov")
+        ) { _ in
+            try? await Task.sleep(for: .seconds(30))
+        }
         let uiActiveVideo = FileManager.default.temporaryDirectory
             .appendingPathComponent("export-tool-ui-active-\(UUID().uuidString).mp4")
-        let uiActiveResult = await h.runRaw("export_project", args: [
+        let uiActiveResult = try await h.runOK("export_project", args: [
             "mode": "video",
             "outputPath": uiActiveVideo.path,
-        ])
-        #expect(uiActiveResult.isError)
-        #expect(ToolHarness.textOf(uiActiveResult).contains("Another export"))
+        ]) as? [String: Any]
+        #expect(uiActiveResult?["status"] as? String == "queued")
+        #expect(uiActiveResult?["queuePosition"] as? Int == 1)
+        if let rawID = uiActiveResult?["jobId"] as? String, let id = UUID(uuidString: rawID) {
+            h.exportQueue.cancel(id)
+        }
+        h.exportQueue.cancel(blocker.jobID)
         #expect(!FileManager.default.fileExists(atPath: uiActiveVideo.path))
     }
 
@@ -104,6 +111,7 @@ struct ExportProjectToolTests {
         #expect(result?["durationFrames"] as? Int == 42)
         // Exporting by id doesn't switch the active timeline.
         #expect(h.editor.activeTimelineId == activeBefore)
+        try await waitForJob(from: result, in: h.exportQueue)
         let xml = String(decoding: try Data(contentsOf: out), as: UTF8.self)
         #expect(xml.contains("<name>B-Roll Cut</name>"))
 
@@ -125,8 +133,23 @@ struct ExportProjectToolTests {
             "mode": "xml",
             "outputPath": xmlURL.path,
         ]) as? [String: Any]
-        #expect(xml?["status"] as? String == "exported")
+        #expect(["started", "queued"].contains(xml?["status"] as? String ?? ""))
         #expect(xml?["mode"] as? String == "xml")
+        try await waitForJob(from: xml, in: h.exportQueue)
         #expect(try String(contentsOf: xmlURL, encoding: .utf8).contains("<xmeml version=\"4\">"))
+    }
+
+    private func waitForJob(from result: [String: Any]?, in queue: ExportQueue) async throws {
+        let rawID = try #require(result?["jobId"] as? String)
+        let id = try #require(UUID(uuidString: rawID))
+        let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+        while ContinuousClock.now < deadline {
+            if let status = queue.jobs.first(where: { $0.id == id })?.status, status.isFinished {
+                #expect(status == .completed)
+                return
+            }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        Issue.record("Export job did not finish")
     }
 }

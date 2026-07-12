@@ -104,4 +104,42 @@ struct ExportServiceRoundTripTests {
         #expect(svc.error == nil, "export reported error: \(svc.error ?? "")")
         #expect(FileManager.default.fileExists(atPath: outURL.path))
     }
+
+    @Test func cancellationPreservesExistingOutput() async throws {
+        let renderSize = CGSize(width: 320, height: 180)
+        let blackURL = try await ImageVideoGenerator.blackVideo(size: renderSize)
+        let mediaRef = "black-cancel-fixture"
+        var manifest = MediaManifest()
+        manifest.entries = [MediaManifestEntry(
+            id: mediaRef, name: "black", type: .video,
+            source: .external(absolutePath: blackURL.path), duration: 60
+        )]
+        let resolver = MediaResolver(manifest: { manifest }, projectURL: { nil })
+        let clip = Fixtures.clip(id: "cancel", mediaRef: mediaRef, start: 0, duration: 1_800)
+        var timeline = Fixtures.timeline(tracks: [Fixtures.videoTrack(clips: [clip])])
+        timeline.width = Int(renderSize.width)
+        timeline.height = Int(renderSize.height)
+
+        let outURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("export-cancel-\(UUID().uuidString).mp4")
+        defer { try? FileManager.default.removeItem(at: outURL) }
+        let existing = Data("existing-output".utf8)
+        try existing.write(to: outURL)
+
+        let service = ExportService()
+        service.onPhaseChange = { phase in
+            if phase == .exporting { service.cancel() }
+        }
+        await service.export(
+            timeline: timeline,
+            resolver: resolver,
+            format: .h264,
+            resolution: .r720p,
+            outputURL: outURL
+        )
+
+        #expect(service.wasCancelled)
+        #expect(service.error == nil)
+        #expect(try Data(contentsOf: outURL) == existing)
+    }
 }
