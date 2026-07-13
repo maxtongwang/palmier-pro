@@ -24,22 +24,23 @@ final class MCPService {
     private(set) var isRunning: Bool = false
 
     @ObservationIgnored
-    private let toolExecutor: ToolExecutor
+    private let projectProvider: () -> VideoProject?
     @ObservationIgnored
     private var httpServer: MCPHTTPServer?
 
-    init(editorProvider: @escaping () -> EditorViewModel?) {
-        self.toolExecutor = ToolExecutor(editorProvider: editorProvider)
+    init(projectProvider: @escaping () -> VideoProject?) {
+        self.projectProvider = projectProvider
     }
 
     func start() {
-        let toolExecutor = self.toolExecutor
         let httpServer = MCPHTTPServer(
             port: Self.port,
             onSessionStarted: {
                 Analytics.capture(.mcpSessionStarted, properties: ["source": "mcp"])
             }
-        ) {
+        ) { [weak self] in
+            guard let self else { preconditionFailure("MCPService released while running") }
+            let toolExecutor = await self.makeSessionToolExecutor()
             let server = Server(
                 name: "palmier-pro",
                 version: "1.0.0",
@@ -64,6 +65,10 @@ final class MCPService {
                 self?.isRunning = false
             }
         }
+    }
+
+    func makeSessionToolExecutor() -> ToolExecutor {
+        ToolExecutor(projectProvider: projectProvider)
     }
 
     func stop() {

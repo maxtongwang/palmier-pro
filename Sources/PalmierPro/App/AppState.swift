@@ -38,8 +38,8 @@ final class AppState {
             Log.mcp.notice("mcp disabled in settings; not starting")
             return
         }
-        let service = MCPService(editorProvider: { [weak self] in
-            self?.activeProject?.editorViewModel
+        let service = MCPService(projectProvider: { [weak self] in
+            self?.activeProject
         })
         service.start()
         mcpService = service
@@ -86,11 +86,17 @@ final class AppState {
     }
 
     func showEditor(for project: VideoProject) {
-        activeProject = project
-        project.editorViewModel.refreshProjectId()
-        recordProjectActive(project)
-        HomeWindowController.shared.window?.orderOut(nil)
+        activateProject(project)
         project.showWindows()
+    }
+
+    func activateProject(_ project: VideoProject) {
+        if activeProject !== project {
+            activeProject = project
+            project.editorViewModel.refreshProjectId()
+            recordProjectActive(project)
+        }
+        HomeWindowController.shared.window?.orderOut(nil)
     }
 
     // Save and close project; switch to next open or show Home. Throws (without closing) if the save fails.

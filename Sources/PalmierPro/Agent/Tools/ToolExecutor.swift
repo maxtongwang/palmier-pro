@@ -7,14 +7,42 @@ struct ToolError: Error { let message: String; init(_ m: String) { self.message 
 @MainActor
 final class ToolExecutor {
     private let editorProvider: () -> EditorViewModel?
-    var editor: EditorViewModel? { editorProvider() }
+    private let projectProvider: (() -> VideoProject?)?
+    private weak var selectedProjectDocument: VideoProject?
+    private var hasProjectSelection = false
+    private var selectedProjectName: String?
+
+    var editor: EditorViewModel? {
+        projectProvider == nil ? editorProvider() : selectedProject?.editorViewModel
+    }
+
+    var selectedProject: VideoProject? {
+        guard let projectProvider else { return nil }
+        if !hasProjectSelection, let project = projectProvider() {
+            selectProject(project)
+        }
+        guard let project = selectedProjectDocument,
+              AppState.shared.openProjects.contains(where: { $0 === project }) else { return nil }
+        return project
+    }
+
+    var visibleProject: VideoProject? { projectProvider?() }
 
     init(editor: EditorViewModel) {
         self.editorProvider = { [weak editor] in editor }
+        self.projectProvider = nil
     }
 
-    init(editorProvider: @escaping () -> EditorViewModel?) {
-        self.editorProvider = editorProvider
+    init(projectProvider: @escaping () -> VideoProject?) {
+        self.editorProvider = { nil }
+        self.projectProvider = projectProvider
+    }
+
+    func selectProject(_ project: VideoProject?) {
+        guard projectProvider != nil else { return }
+        selectedProjectDocument = project
+        selectedProjectName = project?.displayName
+        hasProjectSelection = true
     }
 
     private var agentUndoStack: [String] = []
@@ -49,6 +77,10 @@ final class ToolExecutor {
             return result
         default:
             break
+        }
+
+        if !Self.canReadInactiveProject(tool), let error = projectFocusError() {
+            return .error(error)
         }
 
         guard let editor else {
@@ -113,6 +145,26 @@ final class ToolExecutor {
         )
         // Shorten on pre ∪ post ids: new ids and just-removed ids both stay short.
         return await shorteningIds(in: result, editor: editor, alsoKnown: idsBefore)
+    }
+
+    private func projectFocusError() -> String? {
+        guard projectProvider != nil else { return nil }
+        let selected = selectedProject
+        let visible = visibleProject
+        guard hasProjectSelection, selected !== visible else { return nil }
+        let selectedName = selected?.displayName ?? selectedProjectName ?? "no project"
+        let visibleName = visible?.displayName ?? "no project"
+        return "This session is on '\(selectedName)', but '\(visibleName)' is active in Palmier Pro. Activate '\(selectedName)' or call manage_project with action='open' before making changes."
+    }
+
+    private static func canReadInactiveProject(_ tool: ToolName) -> Bool {
+        switch tool {
+        case .getTimeline, .inspectTimeline, .getMedia, .inspectMedia, .searchMedia,
+             .getMulticam, .getTranscript, .inspectColor, .listModels, .sendFeedback:
+            true
+        default:
+            false
+        }
     }
 
     private func captureToolAnalytics(

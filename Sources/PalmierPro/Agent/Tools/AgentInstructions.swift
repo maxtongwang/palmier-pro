@@ -130,13 +130,15 @@ enum AgentInstructions {
     static let projectNavigation: String = """
 
         # Projects
-        manage_project chooses which project you edit — every other tool acts on the active \
-        project, and you may start with none open. Use action='list' when unsure what's \
+        manage_project chooses which project this MCP session edits, and you may start with \
+        none open. Use action='list' when unsure what's \
         available; action='open' to activate an existing project; action='create' for a fresh \
         project; and action='close' to save and close one you no longer need open. It never \
         deletes projects.
-        Only one project is active at a time — opening or creating one switches the active \
-        project, and the user sees the window change.
+        The session stays on its project if the user activates another project window. Reads \
+        still inspect the session project, but changes pause until that project is visible \
+        again or action='open' selects the visible project. Other MCP sessions and in-app \
+        chats keep their own project context.
         """
 
     /// In-app agent only

@@ -1019,7 +1019,7 @@ enum ToolDefinitions {
     /// MCP server only
     static let manageProject = AgentTool(
         name: .manageProject,
-        description: "List, open, create, or close Palmier projects. Set `action` to: `list` for known projects and active/open state; `open` with a name, id from list, or .palmier path; `create` with an optional name and initial fps/aspectRatio/quality; or `close` to save and close the active project, optionally targeting another open project by name/id/path. Opening or creating makes that project active, so all editing tools act on it. Closing always completes a final save first. This tool never deletes projects or files.",
+        description: "List, open, create, or close Palmier projects for this MCP session. Set `action` to: `list` for known projects plus session-active and visible state; `open` with a name, id from list, or .palmier path; `create` with an optional name and initial fps/aspectRatio/quality; or `close` to save and close the session project, optionally targeting another open project by name/id/path. Opening or creating changes only this session's target. Closing always completes a final save first. This tool never deletes projects or files.",
         inputSchema: objectSchema(
             properties: [
                 "action": ["type": "string", "enum": ["list", "open", "create", "close"], "description": "Project operation."],

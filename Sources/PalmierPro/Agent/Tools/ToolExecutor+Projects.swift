@@ -34,8 +34,10 @@ extension ToolExecutor {
         try validateUnknownKeys(args, allowed: [], path: "manage_project action='list'")
         let openDocs = AppState.shared.openProjects
         let openURLs = Set(openDocs.compactMap { $0.fileURL?.standardizedFileURL })
-        let active = AppState.shared.activeProject
+        let active = selectedProject
         let activeURL = active?.fileURL?.standardizedFileURL
+        let visible = visibleProject
+        let visibleURL = visible?.fileURL?.standardizedFileURL
 
         // Only registered projects, sorted by most recently opened.
         let projects = ProjectRegistry.shared.sortedEntries.map { entry -> [String: Any] in
@@ -46,6 +48,7 @@ extension ToolExecutor {
                 "path": entry.url.path,
                 "isOpen": openURLs.contains(url),
                 "isActive": activeURL == url,
+                "isVisible": visibleURL == url,
                 "isAccessible": entry.isAccessible,
             ]
         }
@@ -53,6 +56,9 @@ extension ToolExecutor {
         var payload: [String: Any] = ["openCount": openDocs.count, "projects": projects]
         if let active {
             payload["active"] = ["name": active.displayName ?? Project.defaultProjectName, "path": active.fileURL?.path ?? ""]
+        }
+        if let visible {
+            payload["visible"] = ["name": visible.displayName ?? Project.defaultProjectName, "path": visible.fileURL?.path ?? ""]
         }
         return .ok(Self.jsonString(payload) ?? "{}")
     }
@@ -68,6 +74,7 @@ extension ToolExecutor {
             throw ToolError("No project at \(url.path).")
         }
         let doc = try await AppState.shared.openProjectAsync(at: url)
+        selectProject(doc)
         notifyNowEditing(doc)
         let result = ToolResult.ok(Self.jsonString(projectSnapshot(doc, status: "active")) ?? "{}")
         return await shorteningIds(in: result, editor: doc.editorViewModel)
@@ -82,6 +89,7 @@ extension ToolExecutor {
         let settingsArgs = args.filter { ["fps", "aspectRatio", "quality"].contains($0.key) }
         let settings = try settingsArgs.isEmpty ? nil : validateProjectSettings(settingsArgs)
         let doc = try await AppState.shared.createProject(named: name)
+        selectProject(doc)
         if let settings {
             _ = try setProjectSettings(doc.editorViewModel, settings)
         }
@@ -103,26 +111,34 @@ extension ToolExecutor {
                 throw ToolError("Project at \(url.path) isn't open.")
             }
             target = doc
-        } else if let active = AppState.shared.activeProject {
+        } else if let active = selectedProject {
             target = active
         } else {
             throw ToolError("No project is open.")
         }
         let name = target.displayName ?? Project.defaultProjectName
+        let wasSelected = selectedProject === target
         do {
             try await AppState.shared.closeProject(target)
         } catch {
             throw ToolError("Couldn't save '\(name)' — project left open. \(error.localizedDescription)")
         }
+        if wasSelected { selectProject(nil) }
         var payload: [String: Any] = [
             "status": "closed",
             "name": name,
             "openCount": AppState.shared.openProjects.count,
         ]
-        if let nowActive = AppState.shared.activeProject {
+        if let nowActive = selectedProject {
             payload["active"] = [
                 "name": nowActive.displayName ?? Project.defaultProjectName,
                 "path": nowActive.fileURL?.path ?? "",
+            ]
+        }
+        if let visible = visibleProject {
+            payload["visible"] = [
+                "name": visible.displayName ?? Project.defaultProjectName,
+                "path": visible.fileURL?.path ?? "",
             ]
         }
         return .ok(Self.jsonString(payload) ?? "{}")
