@@ -38,9 +38,8 @@ final class MCPService {
             onSessionStarted: {
                 Analytics.capture(.mcpSessionStarted, properties: ["source": "mcp"])
             }
-        ) { [weak self] in
-            guard let self else { preconditionFailure("MCPService released while running") }
-            let toolExecutor = await self.makeSessionToolExecutor()
+        ) { [self] in
+            let toolExecutor = await makeSessionToolExecutor()
             let server = Server(
                 name: "palmier-pro",
                 version: "1.0.0",
