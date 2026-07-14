@@ -18,7 +18,7 @@ struct HomeView: View {
     var body: some View {
         HStack(spacing: 0) {
             HomeSidebar()
-                .frame(width: 220)
+                .frame(width: AppTheme.Settings.sidebarWidth)
 
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
