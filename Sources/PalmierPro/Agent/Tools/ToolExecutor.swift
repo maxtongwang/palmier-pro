@@ -236,16 +236,15 @@ final class ToolExecutor {
         case .denoiseAudio:  return try denoiseAudio(editor, args)
         case .inspectColor:  return try await inspectColor(editor, args)
         case .addClips:         return try addClips(editor, args)
-        case .insertClips:      return try withUndoGroup(editor, actionName: "Insert Clips (Agent)") { try insertClips(editor, args) }
-        case .removeClips:      return try withUndoGroup(editor, actionName: "Remove Clips (Agent)") { try removeClips(editor, args) }
+        case .insertClips:      return try insertClips(editor, args)
+        case .removeClips:      return try removeClips(editor, args)
         case .manageTracks:     return try manageTracks(editor, args)
         case .moveClips:        return try moveClips(editor, args)
-        case .applyLayout:
-            return try withUndoGroup(editor, actionName: "Apply Layout (Agent)") { try applyLayout(editor, args) }
+        case .applyLayout:      return try applyLayout(editor, args)
         case .setClipProperties: return try setClipProperties(editor, args)
         case .setKeyframes:     return try setKeyframes(editor, args)
-        case .splitClips:       return try withUndoGroup(editor, actionName: "Split Clips (Agent)") { try splitClips(editor, args) }
-        case .rippleDeleteRanges: return try withUndoGroup(editor, actionName: "Ripple Delete (Agent)") { try rippleDeleteRanges(editor, args) }
+        case .splitClips:       return try splitClips(editor, args)
+        case .rippleDeleteRanges: return try rippleDeleteRanges(editor, args)
         case .removeWords:   return try await removeWords(editor, args)
         case .removeSilence: return try removeSilence(editor, args)
         case .syncClips:     return try await syncClips(editor, args)
@@ -266,8 +265,7 @@ final class ToolExecutor {
         case .listModels:    return listModels(args)
         case .organizeMedia: return try organizeMedia(editor, args)
         case .sendFeedback:  return try await sendFeedback(editor, args)
-        case .setProjectSettings:
-            return try withUndoGroup(editor, actionName: "Set Project Settings (Agent)") { try setProjectSettings(editor, args) }
+        case .setProjectSettings: return try setProjectSettings(editor, args)
         case .createTimeline:     return try createTimeline(editor, args)
         case .setActiveTimeline:  return try setActiveTimeline(editor, args)
         case .readSkill:     return readSkill(args)
