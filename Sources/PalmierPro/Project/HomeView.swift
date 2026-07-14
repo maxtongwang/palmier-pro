@@ -50,8 +50,8 @@ struct HomeView: View {
             header
             SampleProjectsStrip()
             Text("My Projects")
-                .font(.system(size: AppTheme.FontSize.md, weight: .semibold))
-                .foregroundStyle(AppTheme.Text.secondaryColor)
+                .font(.system(size: AppTheme.FontSize.md, weight: AppTheme.FontWeight.regular))
+                .foregroundStyle(AppTheme.Text.primaryColor)
                 .padding(.horizontal, AppTheme.Spacing.xlXxl)
                 .padding(.bottom, AppTheme.Spacing.sm)
             projectGrid
