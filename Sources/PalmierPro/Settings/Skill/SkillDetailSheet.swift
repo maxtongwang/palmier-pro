@@ -52,10 +52,7 @@ struct SkillDetailSheet: View {
                     }
             }
         }
-        .onDisappear {
-            commitDraftIfDirty()
-            commitTitle()
-        }
+        .interactiveDismissDisabled((editing && draft != originalDraft) || editingTitle)
         .onExitCommand {
             if editingTitle {
                 cancelTitleEditing()
