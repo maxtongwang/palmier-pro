@@ -50,7 +50,7 @@ struct SettingsView: View {
     var body: some View {
         HStack(spacing: 0) {
             SettingsSidebar(selectedTab: $selectedTab, visibleTabs: visibleTabs)
-                .frame(width: 220)
+                .frame(width: AppTheme.Settings.sidebarWidth)
 
             SettingsDetail(tab: selectedTab)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -91,7 +91,7 @@ private struct SettingsSidebar: View {
     private var tabList: some View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.xxs) {
             ForEach(visibleTabs) { tab in
-                SidebarRowButton(
+                SettingsSidebarRow(
                     label: tab.label,
                     systemImage: tab.systemImage,
                     isSelected: selectedTab == tab,
@@ -104,36 +104,78 @@ private struct SettingsSidebar: View {
     }
 }
 
+private struct SettingsSidebarRow: View {
+    let label: String
+    let systemImage: String
+    let isSelected: Bool
+    let action: () -> Void
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: AppTheme.Spacing.smMd) {
+                Image(systemName: systemImage)
+                    .font(.system(size: AppTheme.FontSize.md))
+                    .frame(width: AppTheme.IconSize.sm)
+                Text(label)
+                    .font(.system(size: AppTheme.FontSize.mdLg, weight: AppTheme.FontWeight.regular))
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, AppTheme.Spacing.md)
+            .padding(.vertical, AppTheme.Spacing.sm)
+            .foregroundStyle(AppTheme.Text.primaryColor)
+            .background(Capsule(style: .continuous).fill(rowFill))
+            .contentShape(Capsule(style: .continuous))
+            .onHover { isHovered = $0 }
+            .animation(.easeOut(duration: AppTheme.Anim.hover), value: isHovered)
+            .animation(.easeOut(duration: AppTheme.Anim.hover), value: isSelected)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var rowFill: Color {
+        switch (isSelected, isHovered) {
+        case (true, true): Color.white.opacity(AppTheme.Opacity.muted)
+        case (true, false): Color.white.opacity(AppTheme.Opacity.soft)
+        case (false, true): Color.white.opacity(AppTheme.Opacity.faint)
+        case (false, false): .clear
+        }
+    }
+}
+
 private struct SettingsDetail: View {
     let tab: SettingsTab
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text(tab.label)
-                    .font(.system(size: AppTheme.FontSize.title2, weight: .light))
-                    .tracking(AppTheme.Tracking.tight)
-                    .foregroundStyle(AppTheme.Text.primaryColor)
-                Spacer()
-            }
-            .padding(.horizontal, AppTheme.Spacing.xlXxl)
-            .padding(.top, AppTheme.Spacing.xxl)
-            .padding(.bottom, AppTheme.Spacing.lgXl)
+            Text(tab.label)
+                .font(.system(size: AppTheme.FontSize.title1, weight: AppTheme.FontWeight.regular))
+                .foregroundStyle(AppTheme.Text.primaryColor)
+                .frame(
+                    maxWidth: tab == .skills
+                        ? AppTheme.Settings.skillsContentMaxWidth
+                        : AppTheme.Settings.contentMaxWidth,
+                    alignment: .leading
+                )
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, AppTheme.Spacing.xxl)
+                .padding(.top, AppTheme.Spacing.xxl)
+                .padding(.bottom, AppTheme.Spacing.xxl)
 
             Group {
                 if tab == .skills {
                     SkillsPane()
                 } else {
                     ScrollView {
-                        VStack(alignment: .leading, spacing: AppTheme.Spacing.lg) {
+                        VStack(alignment: .leading, spacing: AppTheme.Spacing.xxl) {
                             switch tab {
                             case .account:
                                 AccountPane()
                             case .general:
-                                SettingsSection(title: "Notification") {
+                                SettingsSection(title: "Notifications") {
                                     NotificationsPane()
                                 }
-                                SettingsSection(title: "Telemetry") {
+                                SettingsSection(title: "Privacy & Diagnostics") {
                                     PrivacyPane()
                                 }
                             case .models:
@@ -146,8 +188,10 @@ private struct SettingsDetail: View {
                                 StoragePane()
                             }
                         }
-                        .padding(.horizontal, AppTheme.Spacing.xlXxl)
-                        .padding(.bottom, AppTheme.Spacing.xlXxl)
+                        .frame(maxWidth: AppTheme.Settings.contentMaxWidth, alignment: .leading)
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal, AppTheme.Spacing.xxl)
+                        .padding(.bottom, AppTheme.Spacing.xxl)
                     }
                     .scrollEdgeEffectStyle(.soft, for: .top)
                 }
@@ -163,13 +207,25 @@ struct SettingsSection<Content: View>: View {
     @ViewBuilder let content: () -> Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
+        VStack(alignment: .leading, spacing: AppTheme.Spacing.smMd) {
             Text(title)
-                .font(.system(size: AppTheme.FontSize.xs, weight: .semibold))
-                .foregroundStyle(AppTheme.Text.tertiaryColor)
-                .textCase(.uppercase)
-                .tracking(AppTheme.Tracking.wide)
-            content()
+                .font(.system(size: AppTheme.FontSize.smMd, weight: AppTheme.FontWeight.regular))
+                .foregroundStyle(AppTheme.Text.primaryColor)
+
+            VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
+                content()
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, AppTheme.Spacing.lgXl)
+            .padding(.vertical, AppTheme.Spacing.mdLg)
+            .background(
+                RoundedRectangle(cornerRadius: AppTheme.Radius.mdLg, style: .continuous)
+                    .fill(AppTheme.Background.prominentColor)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: AppTheme.Radius.mdLg, style: .continuous)
+                    .strokeBorder(AppTheme.Border.subtleColor, lineWidth: AppTheme.BorderWidth.thin)
+            )
         }
     }
 }
@@ -180,10 +236,10 @@ struct SettingsToggleRow: View {
     @Binding var isOn: Bool
 
     var body: some View {
-        HStack(alignment: .top, spacing: AppTheme.Spacing.md) {
+        HStack(alignment: .center, spacing: AppTheme.Spacing.md) {
             VStack(alignment: .leading, spacing: AppTheme.Spacing.xs) {
                 Text(title)
-                    .font(.system(size: AppTheme.FontSize.md))
+                    .font(.system(size: AppTheme.FontSize.md, weight: AppTheme.FontWeight.regular))
                     .foregroundStyle(AppTheme.Text.primaryColor)
                 Text(subtitle)
                     .font(.system(size: AppTheme.FontSize.sm))
@@ -196,9 +252,11 @@ struct SettingsToggleRow: View {
             Toggle("", isOn: $isOn)
                 .labelsHidden()
                 .toggleStyle(.switch)
-                .controlSize(.small)
-                .padding(.top, AppTheme.Spacing.xxs)
+                .controlSize(.mini)
+                .accessibilityLabel(title)
+                .accessibilityHint(subtitle)
         }
+        .frame(maxWidth: .infinity)
     }
 }
 

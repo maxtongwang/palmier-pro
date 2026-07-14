@@ -4,6 +4,8 @@ struct TopOffField<Trailing: View>: View {
     @Binding var dollars: Int
     var controlSize: ControlSize = .regular
     var fillWidth: Bool = true
+    var fieldFill: Color = AppTheme.Background.surfaceColor
+    var buttonFill: AnyShapeStyle? = nil
     var onBuy: () -> Void
     @ViewBuilder var trailing: () -> Trailing
 
@@ -16,8 +18,18 @@ struct TopOffField<Trailing: View>: View {
                     .font(.system(size: AppTheme.FontSize.sm))
                     .foregroundStyle(AppTheme.Text.secondaryColor)
                 TextField("", value: $dollars, format: .number)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 56)
+                    .textFieldStyle(.plain)
+                    .padding(.horizontal, AppTheme.Spacing.smMd)
+                    .padding(.vertical, AppTheme.Spacing.xs)
+                    .frame(width: AppTheme.Settings.creditInputWidth)
+                    .background(
+                        RoundedRectangle(cornerRadius: AppTheme.Radius.sm, style: .continuous)
+                            .fill(fieldFill)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: AppTheme.Radius.sm, style: .continuous)
+                            .strokeBorder(AppTheme.Border.subtleColor, lineWidth: AppTheme.BorderWidth.thin)
+                    )
                     .disabled(account.isBuyingCredits)
                 Text(credits == 1 ? "= 1 credit" : "= \(credits.formatted()) credits")
                     .font(.system(size: AppTheme.FontSize.sm))
@@ -36,7 +48,7 @@ struct TopOffField<Trailing: View>: View {
                     Text(buttonLabel)
                         .frame(maxWidth: fillWidth ? .infinity : nil)
                 }
-                .buttonStyle(.capsule(.secondary, size: capsuleSize))
+                .buttonStyle(.capsule(.secondary, size: capsuleSize, fill: buttonFill))
                 .disabled(account.isBuyingCredits || !isValid)
 
                 trailing()
@@ -64,12 +76,16 @@ extension TopOffField where Trailing == EmptyView {
         dollars: Binding<Int>,
         controlSize: ControlSize = .regular,
         fillWidth: Bool = true,
+        fieldFill: Color = AppTheme.Background.surfaceColor,
+        buttonFill: AnyShapeStyle? = nil,
         onBuy: @escaping () -> Void
     ) {
         self.init(
             dollars: dollars,
             controlSize: controlSize,
             fillWidth: fillWidth,
+            fieldFill: fieldFill,
+            buttonFill: buttonFill,
             onBuy: onBuy,
             trailing: { EmptyView() }
         )
