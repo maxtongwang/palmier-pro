@@ -14,6 +14,7 @@ struct SkillDetailSheet: View {
     @State private var editingTitle = false
     @State private var draftTitle = ""
     @State private var copyToast: CopyToast?
+    @State private var showingSaveError = false
     @FocusState private var titleFocused: Bool
 
     private struct CopyToast: Equatable {
@@ -61,6 +62,11 @@ struct SkillDetailSheet: View {
             } else {
                 close()
             }
+        }
+        .alert("Unable to save skill", isPresented: $showingSaveError) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("Add nonempty name and description fields to the skill frontmatter.")
         }
     }
 
@@ -147,8 +153,7 @@ struct SkillDetailSheet: View {
 
                 if dirty {
                     Button("Save Changes") {
-                        store.save(skill, raw: draft)
-                        originalDraft = draft
+                        commitDraftIfDirty()
                     }
                     .buttonStyle(.capsule(.prominent))
                     .keyboardShortcut("s", modifiers: .command)
@@ -238,7 +243,7 @@ struct SkillDetailSheet: View {
     private func toggleEditing(_ skill: Skill) {
         commitTitle()
         if editing {
-            commitDraftIfDirty()
+            guard commitDraftIfDirty() else { return }
             editing = false
             return
         }
@@ -257,10 +262,15 @@ struct SkillDetailSheet: View {
         }
     }
 
-    private func commitDraftIfDirty() {
-        guard draft != originalDraft, let skill else { return }
-        store.save(skill, raw: draft)
+    @discardableResult
+    private func commitDraftIfDirty() -> Bool {
+        guard draft != originalDraft else { return true }
+        guard let skill, store.save(skill, raw: draft) else {
+            showingSaveError = true
+            return false
+        }
         originalDraft = draft
+        return true
     }
 
     private func commitTitle() {
@@ -275,7 +285,7 @@ struct SkillDetailSheet: View {
     }
 
     private func close() {
-        commitDraftIfDirty()
+        guard commitDraftIfDirty() else { return }
         commitTitle()
         dismiss()
     }

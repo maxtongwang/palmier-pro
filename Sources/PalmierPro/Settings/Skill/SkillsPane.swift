@@ -261,6 +261,9 @@ struct SkillsPane: View {
             statusColor: state?.color ?? AppTheme.Text.tertiaryColor,
             actionTitle: skill == nil ? "Install" : isCommunityInstall && state == .update ? "Update" : "Open",
             working: working.contains(entry.id),
+            summaryAction: skill.map { installedSkill in
+                { present(installedSkill.id) }
+            },
             action: {
                 if let skill {
                     if isCommunityInstall, state == .update {
