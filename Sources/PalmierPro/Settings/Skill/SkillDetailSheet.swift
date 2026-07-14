@@ -1,0 +1,365 @@
+import SwiftUI
+
+struct SkillDetailSheet: View {
+    let skillID: String
+
+    @Bindable private var store = SkillStore.shared
+    @Bindable private var catalog = SkillCatalog.shared
+    @Environment(\.dismiss) private var dismiss
+    @State private var editing = false
+    @State private var draft = ""
+    @State private var originalDraft = ""
+    @State private var confirmingDelete = false
+    @State private var isUpdating = false
+    @State private var editingTitle = false
+    @State private var draftTitle = ""
+    @State private var copyToast: CopyToast?
+    @FocusState private var titleFocused: Bool
+
+    private struct CopyToast: Equatable {
+        let agentLabel: String
+        let url: URL
+
+        var displayPath: String {
+            url.path.replacingOccurrences(of: NSHomeDirectory(), with: "~")
+        }
+    }
+
+    private var skill: Skill? {
+        store.skills.first { $0.id == skillID }
+    }
+
+    private var deleteTitle: String {
+        guard let skill else { return "Delete skill?" }
+        return "Delete \u{201C}\(skill.name)\u{201D}?"
+    }
+
+    var body: some View {
+        Group {
+            if let skill {
+                content(skill)
+            } else {
+                Text("Skill unavailable.")
+                    .font(.system(size: AppTheme.FontSize.sm))
+                    .foregroundStyle(AppTheme.Text.tertiaryColor)
+                    .frame(width: AppTheme.Settings.skillDetailWidth)
+                    .frame(minHeight: AppTheme.Settings.skillDetailMinHeight)
+            }
+        }
+        .onDisappear {
+            commitDraftIfDirty()
+            commitTitle()
+        }
+    }
+
+    private func content(_ skill: Skill) -> some View {
+        VStack(alignment: .leading, spacing: AppTheme.Spacing.zero) {
+            header(skill)
+            Divider().overlay(AppTheme.Border.subtleColor)
+
+            if editing {
+                editContent
+            } else {
+                ScrollView {
+                    viewContent(skill)
+                        .padding(AppTheme.Spacing.xlXxl)
+                }
+                .scrollEdgeEffectStyle(.soft, for: .top)
+                .background(AppTheme.Background.raisedColor)
+                .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.md, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: AppTheme.Radius.md, style: .continuous)
+                        .strokeBorder(AppTheme.Border.subtleColor, lineWidth: AppTheme.BorderWidth.thin)
+                )
+                .padding(.horizontal, AppTheme.Spacing.xlXxl)
+                .padding(.top, AppTheme.Spacing.mdLg)
+                .padding(.bottom, AppTheme.Spacing.xlXxl)
+            }
+        }
+        .frame(width: AppTheme.Settings.skillDetailWidth)
+        .frame(minHeight: AppTheme.Settings.skillDetailMinHeight)
+        .background(AppTheme.Background.prominentColor)
+        .overlay(alignment: .top) {
+            if let toast = copyToast {
+                copyToastBanner(toast)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .animation(.easeInOut(duration: AppTheme.Anim.transition), value: copyToast)
+        .confirmationDialog(
+            deleteTitle,
+            isPresented: $confirmingDelete,
+            titleVisibility: .visible,
+            presenting: self.skill
+        ) { skill in
+            Button("Delete \u{201C}\(skill.name)\u{201D}", role: .destructive) {
+                store.delete(skill)
+                dismiss()
+            }
+            Button("Keep Skill", role: .cancel) {}
+        } message: { skill in
+            Text("This permanently removes \(displayPath(skill)).")
+        }
+    }
+
+    private func header(_ skill: Skill) -> some View {
+        let state = store.installed[skill.id].map { _ in
+            SkillCommunityState.resolve(skill, store: store, catalog: catalog)
+        }
+        let dirty = editing && draft != originalDraft
+
+        return VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
+            HStack(spacing: AppTheme.Spacing.md) {
+                titleView(skill)
+                Spacer(minLength: AppTheme.Spacing.md)
+                Button {
+                    commitDraftIfDirty()
+                    commitTitle()
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: AppTheme.FontSize.md, weight: AppTheme.FontWeight.regular))
+                        .foregroundStyle(AppTheme.Text.tertiaryColor)
+                        .frame(width: AppTheme.IconSize.md, height: AppTheme.IconSize.md)
+                        .padding(AppTheme.Spacing.xs)
+                        .hoverHighlight(cornerRadius: AppTheme.Radius.sm)
+                }
+                .buttonStyle(.plain)
+                .keyboardShortcut(.cancelAction)
+                .accessibilityLabel("Close")
+                .help("Close")
+            }
+
+            HStack(spacing: AppTheme.Spacing.smMd) {
+                Text(state?.label ?? "Local")
+                    .font(.system(size: AppTheme.FontSize.xs))
+                    .foregroundStyle(state?.color ?? AppTheme.Text.tertiaryColor)
+
+                Spacer(minLength: AppTheme.Spacing.md)
+
+                if state == .update {
+                    if isUpdating {
+                        ProgressView()
+                            .controlSize(.small)
+                            .accessibilityLabel("Updating \(skill.name)")
+                    } else {
+                        Button("Update") { update(skill) }
+                            .buttonStyle(.capsule(.secondary, fill: AnyShapeStyle(AppTheme.Background.raisedColor)))
+                    }
+                }
+
+                SkillExternalAgentMenu(skill: skill, store: store) { agent, url in
+                    copyToast = CopyToast(agentLabel: agent.label, url: url)
+                }
+
+                if dirty {
+                    Button("Save Changes") {
+                        store.save(skill, raw: draft)
+                        originalDraft = draft
+                    }
+                    .buttonStyle(.capsule(.prominent))
+                    .keyboardShortcut("s", modifiers: .command)
+                }
+
+                Button(editing ? "Preview" : "Edit") {
+                    toggleEditing(skill)
+                }
+                .buttonStyle(.capsule(.secondary, fill: AnyShapeStyle(AppTheme.Background.raisedColor)))
+
+                actionsMenu(skill)
+            }
+        }
+        .padding(.horizontal, AppTheme.Spacing.xlXxl)
+        .padding(.vertical, AppTheme.Spacing.mdLg)
+    }
+
+    @ViewBuilder
+    private func titleView(_ skill: Skill) -> some View {
+        if editingTitle {
+            TextField("Skill name", text: $draftTitle)
+                .textFieldStyle(.plain)
+                .font(.system(size: AppTheme.FontSize.xl, weight: AppTheme.FontWeight.regular))
+                .foregroundStyle(AppTheme.Text.primaryColor)
+                .accessibilityLabel("Skill name")
+                .focused($titleFocused)
+                .padding(.horizontal, AppTheme.Spacing.sm)
+                .padding(.vertical, AppTheme.Spacing.xs)
+                .background(
+                    RoundedRectangle(cornerRadius: AppTheme.Radius.xs)
+                        .fill(AppTheme.Background.raisedColor)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: AppTheme.Radius.xs)
+                        .strokeBorder(
+                            AppTheme.Accent.link.opacity(AppTheme.Opacity.medium),
+                            lineWidth: AppTheme.BorderWidth.thin
+                        )
+                )
+                .onSubmit { commitTitle() }
+                .onExitCommand { editingTitle = false }
+                .onChange(of: titleFocused) { if !titleFocused { commitTitle() } }
+        } else {
+            Text(skill.name)
+                .font(.system(size: AppTheme.FontSize.xl, weight: AppTheme.FontWeight.regular))
+                .foregroundStyle(AppTheme.Text.primaryColor)
+                .lineLimit(1)
+        }
+    }
+
+    private func actionsMenu(_ skill: Skill) -> some View {
+        Menu {
+            Button("Rename Skill", systemImage: "pencil") {
+                draftTitle = skill.name
+                editingTitle = true
+                titleFocused = true
+            }
+            Button("Show in Finder", systemImage: "folder") {
+                store.reveal(skill.path)
+            }
+            Divider()
+            Button("Delete Skill", systemImage: "trash", role: .destructive) {
+                confirmingDelete = true
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: AppTheme.FontSize.md, weight: AppTheme.FontWeight.medium))
+                .foregroundStyle(AppTheme.Text.secondaryColor)
+                .frame(width: AppTheme.IconSize.md, height: AppTheme.IconSize.md)
+                .padding(AppTheme.Spacing.xs)
+                .hoverHighlight(cornerRadius: AppTheme.Radius.sm)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .accessibilityLabel("More skill actions")
+        .help("More skill actions")
+    }
+
+    private func toggleEditing(_ skill: Skill) {
+        commitTitle()
+        if editing {
+            commitDraftIfDirty()
+            editing = false
+            return
+        }
+
+        draft = (try? String(contentsOf: skill.path, encoding: .utf8)) ?? ""
+        originalDraft = draft
+        editing = true
+    }
+
+    private func update(_ skill: Skill) {
+        guard let entry = catalog.entry(id: skill.id) else { return }
+        isUpdating = true
+        Task {
+            _ = await store.install(entry)
+            isUpdating = false
+        }
+    }
+
+    private func commitDraftIfDirty() {
+        guard draft != originalDraft, let skill else { return }
+        store.save(skill, raw: draft)
+        originalDraft = draft
+    }
+
+    private func commitTitle() {
+        guard editingTitle, let skill else { return }
+        editingTitle = false
+        store.rename(skill, to: draftTitle)
+    }
+
+    private func displayPath(_ skill: Skill) -> String {
+        skill.path.deletingLastPathComponent().path
+            .replacingOccurrences(of: NSHomeDirectory(), with: "~")
+    }
+
+    private func viewContent(_ skill: Skill) -> some View {
+        VStack(alignment: .leading, spacing: AppTheme.Spacing.xl) {
+            VStack(alignment: .leading, spacing: AppTheme.Spacing.xs) {
+                Text("Description")
+                    .font(.system(size: AppTheme.FontSize.smMd, weight: AppTheme.FontWeight.regular))
+                    .foregroundStyle(AppTheme.Text.primaryColor)
+                Text(skill.description)
+                    .font(.system(size: AppTheme.FontSize.smMd))
+                    .foregroundStyle(AppTheme.Text.secondaryColor)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Divider().overlay(AppTheme.Border.subtleColor)
+
+            VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
+                Text("Instructions")
+                    .font(.system(size: AppTheme.FontSize.smMd, weight: AppTheme.FontWeight.regular))
+                    .foregroundStyle(AppTheme.Text.primaryColor)
+                MarkdownText(
+                    text: store.body(for: skill.id) ?? "",
+                    proseFont: .system(size: AppTheme.FontSize.smMd),
+                    blockSpacing: AppTheme.Spacing.sm
+                )
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var editContent: some View {
+        TextEditor(text: $draft)
+            .font(.system(size: AppTheme.FontSize.sm, design: .monospaced))
+            .foregroundStyle(AppTheme.Text.primaryColor)
+            .accessibilityLabel("Skill instructions")
+            .scrollContentBackground(.hidden)
+            .padding(AppTheme.Spacing.md)
+            .background(AppTheme.Background.raisedColor)
+            .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.md))
+            .padding(AppTheme.Spacing.xlXxl)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func copyToastBanner(_ toast: CopyToast) -> some View {
+        HStack(spacing: AppTheme.Spacing.sm) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: AppTheme.FontSize.smMd, weight: AppTheme.FontWeight.semibold))
+                .foregroundStyle(AppTheme.Status.successColor)
+
+            VStack(alignment: .leading, spacing: AppTheme.Spacing.xxs) {
+                Text("Added to \(toast.agentLabel)")
+                    .font(.system(size: AppTheme.FontSize.sm, weight: AppTheme.FontWeight.medium))
+                    .foregroundStyle(AppTheme.Text.primaryColor)
+                Text(toast.displayPath)
+                    .font(.system(size: AppTheme.FontSize.xxs))
+                    .foregroundStyle(AppTheme.Text.mutedColor)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+
+            Spacer(minLength: AppTheme.Spacing.md)
+
+            Button("Open") {
+                store.reveal(toast.url)
+                copyToast = nil
+            }
+            .buttonStyle(.plain)
+            .font(.system(size: AppTheme.FontSize.sm, weight: AppTheme.FontWeight.medium))
+            .foregroundStyle(AppTheme.Accent.link)
+        }
+        .padding(.horizontal, AppTheme.Spacing.mdLg)
+        .padding(.vertical, AppTheme.Spacing.smMd)
+        .frame(maxWidth: AppTheme.Settings.skillToastWidth)
+        .background(
+            RoundedRectangle(cornerRadius: AppTheme.Radius.md)
+                .fill(AppTheme.Background.prominentColor)
+                .overlay(
+                    RoundedRectangle(cornerRadius: AppTheme.Radius.md)
+                        .strokeBorder(AppTheme.Border.primaryColor, lineWidth: AppTheme.BorderWidth.hairline)
+                )
+        )
+        .shadow(AppTheme.Shadow.lg)
+        .padding(.top, AppTheme.Spacing.lgXl)
+        .onTapGesture { copyToast = nil }
+        .task(id: toast) {
+            try? await Task.sleep(for: AppTheme.Settings.skillToastDuration)
+            guard !Task.isCancelled else { return }
+            copyToast = nil
+        }
+    }
+}
