@@ -270,86 +270,25 @@ struct CaptionTab: View {
     }
 
     private var styleSection: some View {
-        EditorPanelGroup("Style", isExpanded: $styleExpanded) {
-            InspectorRow(label: "Font", onReset: { style.fontName = Self.defaultStyle.fontName }) {
-                FontPickerField(current: style.fontName, onPreview: { style.fontName = $0 }, onChange: { style.fontName = $0 }, onCancel: {})
+        TextStyleControls(
+            selection: TextStyleSelection(styles: [style], fallback: Self.defaultStyle),
+            defaults: Self.defaultStyle,
+            styleExpanded: $styleExpanded,
+            groupsExpandedByDefault: false,
+            actions: styleActions
+        )
+    }
+
+    private var styleActions: TextStyleEditingActions {
+        TextStyleEditingActions(
+            apply: { _, mutation in mutation(&style) },
+            commit: { _, mutation in mutation(&style) },
+            commitColor: { _, mutation in mutation(&style) },
+            cancelPending: { _ in },
+            cancelFontPreview: { originalFont in
+                if let originalFont { style.fontName = originalFont }
             }
-            InspectorRow(
-                label: "Style",
-                onReset: {
-                    style.isBold = Self.defaultStyle.isBold
-                    style.isItalic = Self.defaultStyle.isItalic
-                }
-            ) {
-                TextStyleTraitButtons(
-                    isBold: style.isBold,
-                    isItalic: style.isItalic,
-                    onBold: { style.isBold = $0 },
-                    onItalic: { style.isItalic = $0 }
-                )
-            }
-            InspectorRow(label: "Size", onReset: { style.fontSize = Self.defaultStyle.fontSize }) {
-                ScrubbableNumberField(
-                    value: style.fontSize,
-                    range: AppTheme.Caption.minFontSize...AppTheme.Caption.maxFontSize,
-                    format: "%.0f",
-                    valueSuffix: " pt",
-                    onChanged: { style.fontSize = $0 }
-                ) { style.fontSize = $0 }
-            }
-            InspectorRow(label: "Tracking", onReset: { style.tracking = Self.defaultStyle.tracking }) {
-                ScrubbableNumberField(
-                    value: style.tracking,
-                    range: -20...100,
-                    format: "%.1f",
-                    valueSuffix: " pt",
-                    onChanged: { style.tracking = $0 }
-                ) { style.tracking = $0 }
-            }
-            InspectorRow(label: "Line Spacing", onReset: { style.lineSpacing = Self.defaultStyle.lineSpacing }) {
-                ScrubbableNumberField(
-                    value: style.lineSpacing,
-                    range: -100...300,
-                    format: "%.1f",
-                    valueSuffix: " pt",
-                    onChanged: { style.lineSpacing = $0 }
-                ) { style.lineSpacing = $0 }
-            }
-            InspectorRow(label: "Color", onReset: { style.color = Self.defaultStyle.color }) {
-                ColorField(displayColor: style.color.swiftUIColor, onUserChange: { style.color = TextStyle.RGBA($0) })
-            }
-            InspectorRow(label: "Background", onReset: { style.background = Self.defaultStyle.background }) {
-                ToggleColorControl(
-                    label: "Background",
-                    isOn: $style.background.enabled,
-                    color: style.background.color.swiftUIColor,
-                    onColorChange: {
-                        style.background.color = TextStyle.RGBA($0)
-                    }
-                )
-            }
-            InspectorRow(label: "Outline", onReset: { style.border = Self.defaultStyle.border }) {
-                ToggleColorControl(
-                    label: "Outline",
-                    isOn: $style.border.enabled,
-                    color: style.border.color.swiftUIColor,
-                    onColorChange: {
-                        style.border.color = TextStyle.RGBA($0)
-                    }
-                )
-            }
-            InspectorRow(label: "Font Case", onReset: { style.fontCase = Self.defaultStyle.fontCase }) {
-                Menu {
-                    ForEach(TextStyle.FontCase.allCases, id: \.self) { fontCase in
-                        Button(fontCase.label) { style.fontCase = fontCase }
-                    }
-                } label: {
-                    EditorMenuValue(text: style.fontCase.label)
-                }
-                .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).focusable(false)
-                .frame(maxWidth: .infinity)
-            }
-        }
+        )
     }
 
     private var animationSection: some View {
