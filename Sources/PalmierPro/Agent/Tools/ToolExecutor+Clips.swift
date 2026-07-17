@@ -518,6 +518,7 @@ extension ToolExecutor {
         }
 
         let snapshot = timelineSnapshot(editor)
+        let beforeTimeline = editor.timeline
         let setActionName = clipIds.count == 1 ? "Set Clip Property (Agent)" : "Set Clip Properties (Agent)"
         editor.undo.perform(setActionName) {
             for id in clipIds {
@@ -550,6 +551,9 @@ extension ToolExecutor {
                     editor: editor
                 )
             }
+            // set_clip_properties bypasses withTimelineSwap; reconcile captions in the same undo group.
+            // A no-op unless a timing field (trim/speed/duration) actually changed an audible clip.
+            editor.resyncCaptionsAfterSwap(before: beforeTimeline, trigger: setActionName)
         }
         return mutationResult(editor, since: snapshot, touched: clipIds + Array(partners), notes: notes)
     }
