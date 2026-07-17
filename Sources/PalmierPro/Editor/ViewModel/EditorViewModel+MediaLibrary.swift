@@ -774,6 +774,8 @@ extension EditorViewModel {
         /// Per-word timing (clip-relative frames) for karaoke animation; empty when unavailable.
         var words: [WordTiming]? = nil
         var animation: TextAnimation? = nil
+        /// Transcript-derived text recorded as caption provenance; nil for non-caption text.
+        var generatedText: String? = nil
     }
 
     /// Batch variant of `addTextClip` for agent flows.
@@ -821,6 +823,7 @@ extension EditorViewModel {
                 clip.captionGroupId = spec.captionGroupId
                 clip.wordTimings = spec.words
                 clip.textAnimation = spec.animation
+                clip.generatedText = spec.generatedText
                 timeline.tracks[spec.trackIndex].clips.append(clip)
                 createdIds[i] = clip.id
             }
