@@ -98,6 +98,7 @@ final class ToolExecutor {
             return .error("Editor not available")
         }
         let before = editor.timelines
+        editor.lastResyncReport = nil
         let idsBefore = currentIdUniverse(editor)
         let result: ToolResult
         Log.agent.notice(
@@ -245,6 +246,7 @@ final class ToolExecutor {
         case .glossaryRemove: return try glossaryRemove(editor, args)
         case .glossaryApply:  return try await glossaryApply(editor, args)
         case .captionStyle:  return try captionStyle(editor, args)
+        case .resyncCaptions: return try resyncCaptions(editor, args)
         case .exportProject: return try await exportProject(editor, args)
         case .manageExports: return try manageExports(editor, args)
         case .generateVideo: return try generate(editor, args, type: .video)

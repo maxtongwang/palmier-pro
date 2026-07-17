@@ -425,6 +425,20 @@ final class EditorViewModel {
     /// Coalesces rapid rebuild requests so `replaceCurrentItem` doesn't fire per keystroke.
     var pendingRebuildTask: Task<Void, Never>?
 
+    /// How caption resync treats manually-edited caption clips; persisted in project.json.
+    var captionConflictPolicy: CaptionConflictPolicy = .default
+
+    /// True while resync is applying its own writes, so those writes never re-trigger resync.
+    var isResyncingCaptions = false
+
+    /// Last resync summary, stashed by the trigger so the agent tool layer can surface it. Read-and-cleared.
+    var lastResyncReport: CaptionResyncReport?
+
+    /// Test seam: overrides the cache-only word source so triggers can be exercised without real ASR.
+    /// UI edits commit once on mouse-up, so resync runs synchronously in the trigger's transaction
+    /// (one undo reverts both) rather than on a trailing debounce that would split the undo group.
+    var captionWordSourceProvider: (@MainActor (EditorViewModel) -> CaptionWordSource)?
+
     func notifyTimelineChanged(refreshVisuals: Bool = true) {
         guard undo.isRegistrationEnabled else { return }
         enhancePendingDenoises()

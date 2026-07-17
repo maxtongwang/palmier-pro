@@ -33,13 +33,19 @@ struct TextTab: View {
                     get: { clip.textContent ?? "" },
                     set: { new in
                         guard !isBatch else { return }
-                        editor.applyClipProperty(clipId: clip.id, rebuild: true) { $0.textContent = new }
+                        editor.applyClipProperty(clipId: clip.id, rebuild: true) {
+                            if $0.textContent != new { $0.wordTimings = nil }
+                            $0.textContent = new
+                        }
                         editor.fitTextClipToContent(clipId: clip.id)
                     }
                 ),
                 onCommit: { new in
                     guard !isBatch else { return }
-                    editor.commitClipProperty(clipId: clip.id) { $0.textContent = new }
+                    editor.commitClipProperty(clipId: clip.id) {
+                        if $0.textContent != new { $0.wordTimings = nil }
+                        $0.textContent = new
+                    }
                     editor.fitTextClipToContent(clipId: clip.id)
                 }
             )

@@ -257,7 +257,11 @@ extension EditorViewModel {
     /// Run `work` as a single atomic mutation, registering one timeline-swap undo
     func withTimelineSwap(actionName: String, refreshVisuals: Bool = true, _ work: () -> Void) {
         let before = timeline
-        undo.withoutRegistration(work)
+        undo.withoutRegistration {
+            work()
+            // Reactive caption resync joins the same before→after swap (registration is disabled here).
+            resyncCaptionsAfterSwap(before: before, trigger: actionName)
+        }
         let after = timeline
         guard before != after else { return }
         guard undo.isRegistrationEnabled else { return }

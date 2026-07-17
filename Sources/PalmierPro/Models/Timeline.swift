@@ -160,6 +160,15 @@ struct Clip: Codable, Sendable, Equatable, Identifiable {
     var textAnimation: TextAnimation?
     var wordTimings: [WordTiming]?
 
+    // Caption resync provenance (caption text clips only).
+    // Transcript-derived text captured at generation/resync; a clip is "dirty" (manually edited)
+    // when textContent != generatedText. nil = unknown provenance (pre-feature clip).
+    var generatedText: String?
+    // User opt-out for a whole caption group; when true resync leaves the group alone.
+    var resyncExempt: Bool?
+    // Set under the `flag` conflict policy when a dirty clip diverges; cleared on the next match.
+    var resyncConflict: Bool?
+
     // Keyframe tracks for each animatable property. Nil when no animation exists.
     var opacityTrack: KeyframeTrack<Double>?
     var positionTrack: KeyframeTrack<AnimPair>?
@@ -179,6 +188,7 @@ struct Clip: Codable, Sendable, Equatable, Identifiable {
         case fadeInFrames, fadeOutFrames, fadeInInterpolation, fadeOutInterpolation
         case opacity, transform, crop
         case linkGroupId, captionGroupId, multicamGroupId, textContent, textStyle, textAnimation, wordTimings
+        case generatedText, resyncExempt, resyncConflict
         case opacityTrack, positionTrack, scaleTrack, rotationTrack, cropTrack, volumeTrack
         case effects, blendMode
     }
@@ -456,6 +466,9 @@ extension Clip {
             textStyle: try? c.decode(TextStyle.self, forKey: .textStyle),
             textAnimation: try? c.decode(TextAnimation.self, forKey: .textAnimation),
             wordTimings: try? c.decode([WordTiming].self, forKey: .wordTimings),
+            generatedText: try? c.decode(String.self, forKey: .generatedText),
+            resyncExempt: try? c.decode(Bool.self, forKey: .resyncExempt),
+            resyncConflict: try? c.decode(Bool.self, forKey: .resyncConflict),
             opacityTrack: try? c.decode(KeyframeTrack<Double>.self, forKey: .opacityTrack),
             positionTrack: try? c.decode(KeyframeTrack<AnimPair>.self, forKey: .positionTrack),
             scaleTrack: try? c.decode(KeyframeTrack<AnimPair>.self, forKey: .scaleTrack),
