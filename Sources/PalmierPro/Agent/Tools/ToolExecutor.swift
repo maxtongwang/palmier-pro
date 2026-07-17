@@ -168,7 +168,7 @@ final class ToolExecutor {
         switch tool {
         case .getTimeline, .inspectTimeline, .getMedia, .inspectMedia, .searchMedia,
              .getMulticam, .getTranscript, .detectBeats, .inspectColor, .listModels, .sendFeedback,
-             .glossaryList, .glossaryApply:
+             .glossaryList, .glossaryApply, .captionStyle:
             true
         default:
             false
@@ -244,6 +244,7 @@ final class ToolExecutor {
         case .glossaryAdd:    return try glossaryAdd(editor, args)
         case .glossaryRemove: return try glossaryRemove(editor, args)
         case .glossaryApply:  return try await glossaryApply(editor, args)
+        case .captionStyle:  return try captionStyle(editor, args)
         case .exportProject: return try await exportProject(editor, args)
         case .manageExports: return try manageExports(editor, args)
         case .generateVideo: return try generate(editor, args, type: .video)
