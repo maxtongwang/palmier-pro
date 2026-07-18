@@ -60,8 +60,22 @@ struct LintExclusions: Sendable {
         return out
     }
 
-    /// True when `original` is (or contains) a term another stage owns — it must not be flagged.
-    func excludes(original: String) -> Bool { !presentTerms(in: original).isEmpty }
+    /// True when the correction TOUCHES a term another stage owns — i.e. a changed token falls inside
+    /// an excluded term's span. An excluded term sitting only in the unchanged surrounding tokens does
+    /// not suppress the flag (开视频→拍视频 stays flagged even when 视频 or an adjacent 呃 is excluded).
+    func excludesChange(original: String, suggestion: String) -> Bool {
+        let origKeys = CaptionText.tokens(original).map(CaptionText.matchKey).filter { !$0.isEmpty }
+        guard !origKeys.isEmpty else { return false }
+        let sugKeys = CaptionText.tokens(suggestion).map(CaptionText.matchKey).filter { !$0.isEmpty }
+        let changed = CaptionLinter.changedPositions(origKeys, sugKeys)
+        guard !changed.isEmpty else { return false }
+        for seq in termKeySeqs {
+            for range in CaptionLinter.occurrences(of: seq, in: origKeys) where range.contains(where: changed.contains) {
+                return true
+            }
+        }
+        return false
+    }
 }
 
 /// One-shot text completion used for mode:flags. Stubbed in tests so no network is needed.
@@ -195,8 +209,9 @@ enum CaptionLinter {
             let original = r.original.trimmingCharacters(in: .whitespacesAndNewlines)
             let suggestion = r.suggestion.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !original.isEmpty, !suggestion.isEmpty, original != suggestion else { continue }
-            // The flagged word must really be in that line, and must not belong to another stage.
-            guard textContains(w.text, original), !exclusions.excludes(original: original) else { continue }
+            // The flagged word must really be in that line, and the correction must not touch a term
+            // another stage owns.
+            guard textContains(w.text, original), !exclusions.excludesChange(original: original, suggestion: suggestion) else { continue }
             let reason = (r.reason?.isEmpty == false) ? r.reason! : "possible word-substitution error"
             out.append(LintCandidate(
                 clipId: w.clipId, startFrame: w.startFrame, endFrame: w.endFrame,
@@ -216,11 +231,34 @@ enum CaptionLinter {
     }
 
     static func containsSequence(_ haystack: [String], _ needle: [String]) -> Bool {
-        guard !needle.isEmpty, needle.count <= haystack.count else { return false }
-        for start in 0...(haystack.count - needle.count) {
-            if Array(haystack[start..<start + needle.count]) == needle { return true }
+        !occurrences(of: needle, in: haystack).isEmpty
+    }
+
+    /// Every contiguous index range where `needle` appears in `haystack`.
+    static func occurrences(of needle: [String], in haystack: [String]) -> [Range<Int>] {
+        guard !needle.isEmpty, needle.count <= haystack.count else { return [] }
+        var out: [Range<Int>] = []
+        for start in 0...(haystack.count - needle.count) where Array(haystack[start..<start + needle.count]) == needle {
+            out.append(start..<start + needle.count)
         }
-        return false
+        return out
+    }
+
+    /// Indices in `original` that the edit to `suggestion` changed — a common-prefix/suffix diff.
+    /// A pure insertion (empty changed span) touches the two tokens straddling the insertion point.
+    static func changedPositions(_ original: [String], _ suggestion: [String]) -> Set<Int> {
+        let n = original.count, m = suggestion.count
+        let bound = min(n, m)
+        var prefix = 0
+        while prefix < bound, original[prefix] == suggestion[prefix] { prefix += 1 }
+        var suffix = 0
+        while suffix < bound - prefix, original[n - 1 - suffix] == suggestion[m - 1 - suffix] { suffix += 1 }
+        let lo = prefix, hi = n - suffix
+        if lo < hi { return Set(lo..<hi) }
+        var touched = Set<Int>()
+        if lo - 1 >= 0 { touched.insert(lo - 1) }
+        if lo < n { touched.insert(lo) }
+        return touched
     }
 
     private static func extractJSONArray(_ raw: String) -> Data? {

@@ -4,27 +4,34 @@ Phase 2 complete. Ready for Evaluator.
 
 ## caption_lint — transcript-correction lint stage
 
-| Area       | Change                                                                                                            |
-| ---------- | ----------------------------------------------------------------------------------------------------------------- |
-| Core       | CaptionLinter (pure): flag/context/partition + JSON parse; LintExclusions masks glossary + filler terms           |
-| Completer  | LintCompleter protocol; AgentLintCompleter drains AgentClient.stream (tools:[]); reachable() mirrors selectClient |
-| Tool       | ToolExecutor+CaptionLint builds windows from caption text clips w/ neighbour context; paged (200/call)            |
-| Degrade    | flags → context (never errors) when LLM unreachable (nil completer) or the call throws                            |
-| AutoApply  | opt-in autoApplyThreshold routes ≥threshold via update_text(origin:"user") → glossary promotion synergy           |
-| Exclusions | glossary variants/canonicals + caption-style removeAlways/caseByCase/neverRemove/protectedPhrases masked          |
-| Registered | ToolName.captionLint + ToolExecutor.run + ToolDefinitions schema (flag-only default, both modes documented)       |
+| Area       | Change                                                                                                                                                                                                                     |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Core       | CaptionLinter (pure): flag/context/partition + JSON parse; LintExclusions masks glossary + filler terms                                                                                                                    |
+| Completer  | LintCompleter protocol; AgentLintCompleter drains AgentClient.stream (tools:[]); reachable() mirrors selectClient                                                                                                          |
+| Tool       | ToolExecutor+CaptionLint builds windows from caption text clips w/ neighbour context; paged (200/call)                                                                                                                     |
+| Degrade    | flags → context (never errors) when LLM unreachable (nil completer) or the call throws                                                                                                                                     |
+| AutoApply  | opt-in autoApplyThreshold routes ≥threshold via update_text(origin:"user") → glossary promotion synergy                                                                                                                    |
+| Exclusions | glossary variants/canonicals + caption-style removeAlways/caseByCase/neverRemove/protectedPhrases; masked on the CHANGED tokens only (diff original→suggestion), so an excluded term in unchanged context never suppresses |
+| Registered | ToolName.captionLint + ToolExecutor.run + ToolDefinitions schema (flag-only default, both modes documented)                                                                                                                |
 
 ## LLM call path found
 
 - App's only primitive is streaming `AgentClient.stream(system:tools:messages:)` (AgentClientTypes.swift). No one-shot API.
 - Model selection is private on the per-editor `AgentService`; MCP ToolExecutor path has no AgentService.
-- Auth: personal Anthropic key (AnthropicKeychain) OR signed-in account (AccountService.shared). This project's user is NOT signed in (canGenerate:false) → CaptionLintClient.reachable() returns nil → context mode is the primary path.
+- Auth mirrors AgentService.canStream: personal Anthropic key (AnthropicKeychain) OR signed-in account WITH credits (AccountService.shared.isSignedIn && hasCredits). This project's user is NOT signed in (canGenerate:false) → CaptionLintClient.reachable() returns nil → context mode is the primary path.
 - Completer stubbed behind LintCompleter protocol; no network in tests.
+
+## Evaluator fix round 1
+
+- F1 (blocker) — exclusion over-drop fixed: excludesChange(original:suggestion:) diffs the two token sequences (common-prefix/suffix) and suppresses only when a CHANGED token falls inside an excluded term's span. Unchanged surrounding tokens no longer suppress. Regressions: 视频-excluded / 开视频→拍视频 still flagged; adjacent 呃 still flagged; a suggestion that edits the excluded term itself is dropped.
+- F2 — response field transcriptionSource → lintSource (schema updated).
+- F3 — reachable() now requires isSignedIn && hasCredits (mirrors canStream); a zero-credit signed-in user degrades to context.
+- F4 — paging switched from a count+frame cursor to a clipId cursor over the total (startFrame,endFrame,clipId) order: response carries nextClipId; continue via afterClipId. No overlapping-window reprocessing.
 
 ## Verification
 
 - `swift build` — clean.
-- `swift test` (full) — 1220/1220 pass. New: CaptionLintTests (14) — 6 core (incl. 开视频→拍视频 flag, filler+glossary exclusion, context windows, partition gating, absent-original drop, registration) + 8 tool (flag-only, autoApply ≥threshold rewrites clip, below-threshold, built-in filler excluded, context no-call, unreachable degrade, failure degrade, no-captions note).
+- `swift test` (full) — 1224/1224 pass. CaptionLintTests (18): 9 core (开视频→拍视频 flag, filler+glossary exclusion, 3 F1 changed-token regressions, context windows, partition gating, absent-original drop, registration) + 9 tool (flag-only, autoApply ≥threshold rewrites clip, below-threshold, built-in filler excluded, context no-call, unreachable degrade, failure degrade, paging cursor emits each window once, no-captions note).
 
 ---
 

@@ -1,7 +1,7 @@
 // Wraps the app's streaming AgentClient as a one-shot text completer for caption_lint's flags mode.
-// Reachability mirrors AgentService.selectClient: a personal API key uses the direct client, a
-// signed-in account uses the backend, and neither means the app LLM is unreachable (the tool then
-// degrades flags → context). refs feature/caption-lint
+// Reachability mirrors AgentService.canStream: a personal API key uses the direct client, a
+// signed-in account WITH credits uses the backend, and anything else means the app LLM is
+// unreachable (the tool then degrades flags → context). refs feature/caption-lint
 
 import Foundation
 
@@ -29,8 +29,9 @@ struct AgentLintCompleter: LintCompleter {
 
 @MainActor
 enum CaptionLintClient {
-    /// A reachable completer, or nil when there's no personal key and the user is not signed in —
-    /// in which case caption_lint's flags mode degrades to context.
+    /// A reachable completer, or nil when there's no personal key and the account can't stream (not
+    /// signed in, or signed in with no credits) — in which case flags mode degrades to context
+    /// rather than wasting a failing round-trip.
     static func reachable() -> AgentLintCompleter? {
         // Lint is a bounded proofread; Sonnet 5 (low effort) is the cheap default and the only
         // model available without a personal key.
@@ -38,7 +39,8 @@ enum CaptionLintClient {
         if let key = AnthropicKeychain.load(), !key.isEmpty {
             return AgentLintCompleter(client: AnthropicClient(apiKey: key, model: model))
         }
-        if AccountService.shared.isSignedIn {
+        let account = AccountService.shared
+        if account.isSignedIn, account.hasCredits {
             return AgentLintCompleter(client: PalmierClient(model: model))
         }
         return nil

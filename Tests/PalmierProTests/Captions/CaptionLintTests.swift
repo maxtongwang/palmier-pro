@@ -37,15 +37,55 @@ private struct FailingCompleter: LintCompleter {
 
     @Test func fillersAndGlossaryTermsAreNotFlagged() async throws {
         let excl = LintExclusions(terms: ["呃", "小明"])  // filler + a glossary variant
-        #expect(excl.excludes(original: "呃"))
-        #expect(excl.excludes(original: "小明"))
-        #expect(!excl.excludes(original: "拍视频"))
+        // A correction whose change lands on an excluded term is suppressed.
+        #expect(excl.excludesChange(original: "呃", suggestion: "啊"))
+        #expect(excl.excludesChange(original: "小明", suggestion: "小名"))
+        #expect(!excl.excludesChange(original: "拍视频", suggestion: "开视频"))
 
         let w = window("c1", "呃 小明 去 拍视频")
         let stub = StubCompleter(response: """
         [{"clipId":"c1","original":"呃","suggestion":"啊","reason":"x","confidence":0.9},
          {"clipId":"c1","original":"小明","suggestion":"小名","reason":"x","confidence":0.9}]
         """)
+        let flags = try await CaptionLinter.flag(windows: [w], exclusions: excl, completer: stub)
+        #expect(flags.isEmpty)
+    }
+
+    // F1 regression — mask only the CHANGED tokens, not the whole flagged span.
+
+    @Test func excludedTermInUnchangedTokensDoesNotSuppress() async throws {
+        // 视频 is a glossary canonical; the fix changes 开→拍, leaving 视频 untouched → still flagged.
+        let excl = LintExclusions(terms: ["视频"])
+        let w = window("c1", "好久没有开视频了", next: "今天来拍")
+        let stub = StubCompleter(response: """
+        [{"clipId":"c1","original":"开视频","suggestion":"拍视频","reason":"near-sound","confidence":0.8}]
+        """)
+        #expect(!excl.excludesChange(original: "开视频", suggestion: "拍视频"))
+        let flags = try await CaptionLinter.flag(windows: [w], exclusions: excl, completer: stub)
+        #expect(flags.count == 1)
+        #expect(flags.first?.suggestion == "拍视频")
+    }
+
+    @Test func adjacentFillerDoesNotSuppress() async throws {
+        // 呃 is a filler sitting next to the changed word — the change is at 开, so it stays flagged.
+        let excl = LintExclusions(terms: ["呃"])
+        let w = window("c1", "呃开视频了")
+        let stub = StubCompleter(response: """
+        [{"clipId":"c1","original":"呃开视频","suggestion":"呃拍视频","reason":"near-sound","confidence":0.8}]
+        """)
+        #expect(!excl.excludesChange(original: "呃开视频", suggestion: "呃拍视频"))
+        let flags = try await CaptionLinter.flag(windows: [w], exclusions: excl, completer: stub)
+        #expect(flags.count == 1)
+    }
+
+    @Test func changeThatEditsAnExcludedTermIsDropped() async throws {
+        // The suggestion tries to "fix" the excluded glossary term itself → suppressed.
+        let excl = LintExclusions(terms: ["视频"])
+        let w = window("c1", "我在看视频呢")
+        let stub = StubCompleter(response: """
+        [{"clipId":"c1","original":"视频","suggestion":"视屏","reason":"x","confidence":0.9}]
+        """)
+        #expect(excl.excludesChange(original: "视频", suggestion: "视屏"))
         let flags = try await CaptionLinter.flag(windows: [w], exclusions: excl, completer: stub)
         #expect(flags.isEmpty)
     }
@@ -211,6 +251,31 @@ private struct FailingCompleter: LintCompleter {
         let out = body(try await exec.captionLint(e, ["mode": "flags"], completer: FailingCompleter()))
         #expect((out["segments"] as? [[String: Any]])?.count == 1)
         #expect(out["note"] != nil)
+    }
+
+    @Test func pagingCursorEmitsEveryWindowExactlyOnce() async throws {
+        // More windows than one page; overlapping spans must not reprocess across pages.
+        let count = ToolExecutor.captionLintMaxWindows + 50
+        let e = EditorViewModel()
+        e.timeline = Fixtures.timeline(tracks: [Fixtures.videoTrack()])
+        // Overlapping captions: each spans 30 frames but starts 10 apart.
+        _ = e.placeTextClips((0..<count).map { spec("cap\($0)", start: $0 * 10, duration: 30, group: "g1") })
+        let exec = ToolExecutor(editor: e)
+
+        let page1 = body(try await exec.captionLint(e, ["mode": "context"], completer: FailingCompleter()))
+        let seg1 = page1["segments"] as? [[String: Any]] ?? []
+        #expect(seg1.count == ToolExecutor.captionLintMaxWindows)
+        let cursor = try #require(page1["nextClipId"] as? String)
+
+        let page2 = body(try await exec.captionLint(e, ["mode": "context", "afterClipId": cursor], completer: FailingCompleter()))
+        let seg2 = page2["segments"] as? [[String: Any]] ?? []
+        #expect(seg2.count == 50)
+        #expect(page2["nextClipId"] == nil)
+
+        let ids1 = Set(seg1.compactMap { $0["clipId"] as? String })
+        let ids2 = Set(seg2.compactMap { $0["clipId"] as? String })
+        #expect(ids1.isDisjoint(with: ids2))          // no window emitted twice
+        #expect(ids1.union(ids2).count == count)       // every window emitted once
     }
 
     @Test func noCaptionsReturnsHelpfulNote() async throws {

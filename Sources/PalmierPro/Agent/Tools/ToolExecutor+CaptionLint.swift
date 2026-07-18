@@ -7,7 +7,7 @@ import Foundation
 
 extension ToolExecutor {
     private static let captionLintAllowedKeys: Set<String> = [
-        "startFrame", "endFrame", "clipId", "mode", "autoApplyThreshold",
+        "startFrame", "endFrame", "clipId", "mode", "autoApplyThreshold", "afterClipId",
     ]
     static let captionLintMaxWindows = 200
 
@@ -56,21 +56,26 @@ extension ToolExecutor {
             if let e = windowEnd, w.startFrame >= e { return false }
             return true
         }
-        let totalWindows = windows.count
-        var nextStartFrame: Int?
+        // Page by a clipId cursor over the total order (captionWindows is sorted by startFrame,
+        // endFrame, clipId), not a frame threshold — overlapping captions would otherwise re-emit.
+        if let after = args.string("afterClipId"), let idx = windows.firstIndex(where: { $0.clipId == after }) {
+            windows = Array(windows[windows.index(after: idx)...])
+        }
+        let remainingWindows = windows.count
+        var nextClipId: String?
         if windows.count > Self.captionLintMaxWindows {
-            nextStartFrame = windows[Self.captionLintMaxWindows].startFrame
             windows = Array(windows.prefix(Self.captionLintMaxWindows))
+            nextClipId = windows.last?.clipId
         }
 
         let exclusions = Self.lintExclusions(editor)
         var payload: [String: Any] = [
-            "transcriptionSource": "captions",
+            "lintSource": "captions",
             "skippedExclusions": CaptionLinter.maskedCount(windows: windows, exclusions: exclusions),
         ]
-        if totalWindows > windows.count, let nextStartFrame {
-            payload["nextStartFrame"] = nextStartFrame
-            payload["windowsNote"] = "First \(windows.count) of \(totalWindows) caption windows. Continue with startFrame = nextStartFrame."
+        if let nextClipId {
+            payload["nextClipId"] = nextClipId
+            payload["windowsNote"] = "First \(windows.count) of \(remainingWindows) remaining caption windows. Continue with afterClipId = nextClipId."
         }
         if allWindows.isEmpty {
             payload["flags"] = []
@@ -145,7 +150,7 @@ extension ToolExecutor {
                 ))
             }
         }
-        return windows.sorted { ($0.startFrame, $0.endFrame) < ($1.startFrame, $1.endFrame) }
+        return windows.sorted { ($0.startFrame, $0.endFrame, $0.clipId) < ($1.startFrame, $1.endFrame, $1.clipId) }
     }
 
     /// Terms that glossary and caption-style already own — masked out of lint candidacy.
