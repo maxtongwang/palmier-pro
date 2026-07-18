@@ -51,6 +51,7 @@ enum ToolName: String, CaseIterable, Sendable {
     case updateText = "update_text"
     case addCaptions = "add_captions"
     case captionStyle = "caption_style"
+    case captionLint = "caption_lint"
     case resyncCaptions = "resync_captions"
 
     // Glossary (L1 transcript correction layer)
@@ -859,6 +860,19 @@ enum ToolDefinitions {
             name: .captionStyle,
             description: "Returns the resolved caption-style profile for the active project — the measured filler policy and typography defaults, merged from global → library → project layers (later wins). Read this before captioning to honor project-specific policy. fillers.removeAlways is safe to strip; neverRemove must be kept; caseByCase must NEVER be auto-removed — surface those tokens and decide per occurrence with update_text/remove_words. neverDedupe marks CJK reduplication (存存钱) and comic repetition (太酷了×3) as grammar/intent, not stutters — never dedupe them. protectedPhrases are never touched by any pass. `layers` shows each source file and whether it loaded, was missing, or was malformed; `provenance` records how the policy was measured. Read-only; takes no arguments.",
             inputSchema: objectSchema()
+        ),
+        AgentTool(
+            name: .captionLint,
+            description: "Proofreads existing caption text for suspected speech-recognition WORD-SUBSTITUTION errors — near-sound mishearings (开视频 vs 拍视频), wrong homophones/characters, or words that don't fit the surrounding lines. This is the stage no other pass owns: caption_style handles fillers, the glossary handles known proper nouns, and this catches the general ASR slips between them. It FLAGS for review — nothing is changed unless you pass autoApplyThreshold. Before candidacy, tokens owned by other stages are masked out: glossary variants/canonicals (any confidence) and caption-style filler lists (removeAlways/caseByCase/neverRemove/protectedPhrases) are never re-flagged. Word substitutions only — never rephrasing, grammar, or punctuation.\n\nmode:'flags' (default, when the app LLM is reachable) runs the caption windows through the app's model with each line's neighbours as context and returns candidates [{clipId, frameRange, original, suggestion, reason, confidence}] — nothing is applied. If the app LLM is unreachable (not signed in and no API key) it degrades to context with a note rather than failing.\n\nmode:'context' makes NO model call and returns the same windows prepared for YOU to judge — per segment {clipId, frameRange, text, prevText, nextText, exclusions:[masked terms]}. Use this to lint captions yourself without spending the app's credits, then fix with update_text(origin:'user').\n\nautoApplyThreshold (optional 0–1): only meaningful in flags mode. Candidates at or above it are applied via update_text(origin:'user') — which feeds the glossary auto-promotion classifier so a repeated domain term becomes a glossary entry automatically — and reported under `applied`; the rest stay under `flags`. Omit it to stay flag-only. Response: {flags, applied, skippedExclusions, transcriptionSource, note?}. Windows are paged (200 per call) with nextStartFrame when there are more.",
+            inputSchema: objectSchema(
+                properties: [
+                    "clipId": ["type": "string", "description": "Optional. Lint only this caption text clip (from get_timeline captionDetail rows)."],
+                    "startFrame": ["type": "integer", "description": "Optional. Only lint caption clips intersecting [startFrame, endFrame)."],
+                    "endFrame": ["type": "integer", "description": "Optional. Window end (exclusive)."],
+                    "mode": ["type": "string", "enum": CaptionLinter.Mode.allCases.map(\.rawValue), "description": "Default flags: run the app LLM and return candidate corrections (nothing applied). context: no model call — return judgeable windows for you to lint yourself."],
+                    "autoApplyThreshold": ["type": "number", "description": "Optional 0–1. flags mode only. Apply candidates at/above this confidence via update_text(origin:'user'); reported under `applied`. Omit to stay flag-only (default)."],
+                ]
+            )
         ),
         AgentTool(
             name: .applyColor,
