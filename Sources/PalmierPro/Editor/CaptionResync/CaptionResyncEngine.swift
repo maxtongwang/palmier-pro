@@ -137,15 +137,13 @@ enum CaptionResyncEngine {
             return
         }
 
-        let dirty = clip.generatedText != nil && clip.textContent != clip.generatedText
-        if !dirty {
-            // Clean, or unknown provenance (generatedText == nil). Both replace; unknown provenance is
-            // additionally conflict-logged for visibility since we can't prove the text was generated.
+        // Clean only when the text is provably transcript-generated and untouched. Unknown provenance
+        // (generatedText == nil) is treated as dirty: a re-broken or joined custom caption carries no
+        // generatedText, so preserving it by default keeps a manual line-break from being clobbered.
+        let clean = clip.generatedText != nil && clip.textContent == clip.generatedText
+        if clean {
             plan.replacements.append(.init(clipId: clip.id, text: newText, wordTimings: newTimings, generatedText: newText))
             plan.report.updated.append(.init(clipId: clip.id, before: current, after: newText))
-            if clip.generatedText == nil {
-                plan.report.conflicts.append(.init(clipId: clip.id, manualText: current, newTranscript: newText))
-            }
             return
         }
 

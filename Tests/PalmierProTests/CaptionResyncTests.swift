@@ -183,8 +183,10 @@ private func timeline(_ tracks: [Track]) -> Timeline {
         #expect(plan.clearedFlags == ["cap"])
     }
 
-    @Test func unknownProvenanceReplacedAndConflictLogged() {
-        let caption = captionClip(id: "cap", start: 0, duration: 60, text: "pre feature text", generatedText: nil)
+    @Test func unknownProvenancePreservedByDefault() {
+        // nil generatedText = unknown provenance (a re-broken or add_texts-joined custom caption). Under
+        // the default preserve policy it is treated as dirty: kept, conflict-logged, never overwritten.
+        let caption = captionClip(id: "cap", start: 0, duration: 60, text: "my custom line break", generatedText: nil)
         let tl = timeline([Fixtures.videoTrack(clips: [caption])])
         let src = FakeWordSource(words: [word("one", 0, 30), word("two", 30, 60)])
 
@@ -192,8 +194,20 @@ private func timeline(_ tracks: [Track]) -> Timeline {
             timeline: tl, triggerSpans: [0..<60], trigger: "t", fps: 30,
             policy: .preserve, wordSource: src, chunk: singleChunk
         )
+        #expect(plan.replacements.isEmpty)
+        #expect(plan.report.conflicts == [.init(clipId: "cap", manualText: "my custom line break", newTranscript: "one two")])
+    }
+
+    @Test func unknownProvenanceOverwrittenWhenPolicyOverwrite() {
+        let caption = captionClip(id: "cap", start: 0, duration: 60, text: "my custom line break", generatedText: nil)
+        let tl = timeline([Fixtures.videoTrack(clips: [caption])])
+        let src = FakeWordSource(words: [word("one", 0, 30), word("two", 30, 60)])
+
+        let plan = CaptionResyncEngine.plan(
+            timeline: tl, triggerSpans: [0..<60], trigger: "t", fps: 30,
+            policy: .overwrite, wordSource: src, chunk: singleChunk
+        )
         #expect(plan.replacements.first?.text == "one two")
-        #expect(plan.report.conflicts.count == 1)   // logged even though replaced
     }
 
     @Test func exemptGroupIsUntouched() {
