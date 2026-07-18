@@ -15,7 +15,8 @@ actor TranscriptCache {
     /// that wants a fresh biased decode gets one. The hot path passes nil and reads/writes the UNSALTED
     /// key: read-time glossary materialisation already applies corrections regardless of what decoded,
     /// so salting every glossary edit here would re-transcribe the whole file for marginal decode gain.
-    /// `cachedOnDisk` still falls back salted→unsalted, so pre-existing salted entries stay readable. §4
+    /// `cachedOnDisk` reads unsalted→salted so this fresh write wins over any stale pre-A3 salted entry,
+    /// keeping the salted key only as a fallback for legacy salted-only entries. §4
     func transcript(for url: URL, isVideo: Bool, range: ClosedRange<Double>?, preferredLocale: Locale? = nil, cacheTag: String? = nil) async throws -> TranscriptionResult {
         // When a locale is forced, bypass the cache — locale variants must not overwrite the auto-detected entry.
         if let preferredLocale {
@@ -37,13 +38,16 @@ actor TranscriptCache {
         return range.map { Self.filter(full, to: $0) } ?? full
     }
 
-    // Read-only lookups prefer the bias-salted local entry, fall back to the unsalted one (so
-    // pre-glossary transcripts stay searchable/resyncable), and finally the provider-neutral alias
-    // that full-file cloud transcripts write under — cloud entries live in .cloud-variant keys the
+    // Read-only lookups try the UNSALTED local key first — transcript() writes unsalted, so a fresh
+    // unsalted entry must win over a stale pre-A3 salted one for the same file (else resync/search would
+    // diverge from generation's read). The bias-salted key is a later fallback so legacy salted-only
+    // entries (written under the old always-salt code) stay readable, and finally the provider-neutral
+    // alias that full-file cloud transcripts write under — cloud entries live in .cloud-variant keys the
     // local scheme never reaches, so without the alias cloud projects would never resync.
     private nonisolated static func readKeys(for url: URL) -> [String] {
-        let tags: [String?] = TranscriptionBias.fingerprint.map { [$0, nil] } ?? [nil]
-        return (tags.compactMap { key(for: url, cacheTag: $0) } + [key(for: url, variant: .readAlias)].compactMap { $0 })
+        var tags: [String?] = [nil]
+        if let fingerprint = TranscriptionBias.fingerprint { tags.append(fingerprint) }
+        return tags.compactMap { key(for: url, cacheTag: $0) } + [key(for: url, variant: .readAlias)].compactMap { $0 }
     }
 
     nonisolated static func hasCachedOnDisk(for url: URL) -> Bool {
@@ -133,7 +137,7 @@ actor TranscriptCache {
         memory[key] = result
     }
 
-    private static func diskURL(_ key: String) -> URL {
+    static func diskURL(_ key: String) -> URL {
         directory.appendingPathComponent("\(key).json")
     }
 

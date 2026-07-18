@@ -75,7 +75,13 @@ struct TranscriptCacheTests {
         // Only the full-file entry is the resync source; a windowed cloud entry must not become the alias.
         #expect(!TranscriptCache.hasCachedOnDisk(for: file))
     }
+}
 
+// These mutate the process-global TranscriptionBias fingerprint, so they must not run concurrently with
+// one another (a sibling's reset would clobber the fingerprint mid-read). Nothing else in the suite
+// touches TranscriptionBias, so serialising this suite alone removes the race.
+@Suite("TranscriptCache — bias keys", .serialized)
+struct TranscriptCacheBiasKeyTests {
     // A3: the default (nil cacheTag) transcript() key must not shift when the glossary bias fingerprint
     // changes — otherwise every glossary edit re-transcribes the whole file. Explicit tags still salt.
     @Test func defaultCacheKeyIgnoresBiasFingerprintChurn() {
@@ -89,5 +95,53 @@ struct TranscriptCacheTests {
 
         #expect(a != nil && a == b, "default key is unsalted, so fingerprint churn cannot invalidate it")
         #expect(TranscriptCache.key(for: file, cacheTag: "fp-2") != a, "an explicit cacheTag still salts to a distinct key")
+    }
+
+    // A3 read order: transcript() writes the unsalted key, so a fresh unsalted entry must win over a
+    // stale pre-A3 salted entry for the same file — otherwise resync/search diverge from generation.
+    @Test func unsaltedEntryWinsOverStaleSaltedEntry() throws {
+        let (file, cleanup) = try tempMediaFile()
+        defer { cleanup() }
+        TranscriptionBias.update(hotwords: ["OpenAI"], fingerprint: "fp-legacy")
+        defer { TranscriptionBias.update(hotwords: [], fingerprint: "") }
+
+        try seedEntry(text: "STALE", for: file, cacheTag: "fp-legacy")   // old always-salt write
+        try seedEntry(text: "FRESH", for: file, cacheTag: nil)          // post-A3 unsalted write
+        defer { removeEntry(for: file, cacheTag: "fp-legacy"); removeEntry(for: file, cacheTag: nil) }
+
+        #expect(TranscriptCache.cachedOnDisk(for: file)?.text == "FRESH")
+    }
+
+    @Test func legacySaltedOnlyEntryStillReadable() throws {
+        let (file, cleanup) = try tempMediaFile()
+        defer { cleanup() }
+        TranscriptionBias.update(hotwords: ["OpenAI"], fingerprint: "fp-legacy")
+        defer { TranscriptionBias.update(hotwords: [], fingerprint: "") }
+
+        try seedEntry(text: "LEGACY", for: file, cacheTag: "fp-legacy")  // salted-only, no unsalted entry
+        defer { removeEntry(for: file, cacheTag: "fp-legacy") }
+
+        #expect(TranscriptCache.hasCachedOnDisk(for: file))
+        #expect(TranscriptCache.cachedOnDisk(for: file)?.text == "LEGACY")
+    }
+
+    private func tempMediaFile() throws -> (URL, () -> Void) {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("pp-cache-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let file = dir.appendingPathComponent("clip.wav")
+        try Data("audio-bytes".utf8).write(to: file)
+        return (file, { try? FileManager.default.removeItem(at: dir) })
+    }
+
+    private func seedEntry(text: String, for url: URL, cacheTag: String?) throws {
+        let key = try #require(TranscriptCache.key(for: url, cacheTag: cacheTag))
+        let result = TranscriptionResult(text: text, language: "en-US", words: [], segments: [])
+        try FileManager.default.createDirectory(at: TranscriptCache.directory, withIntermediateDirectories: true)
+        try JSONEncoder().encode(result).write(to: TranscriptCache.diskURL(key))
+    }
+
+    private func removeEntry(for url: URL, cacheTag: String?) {
+        guard let key = TranscriptCache.key(for: url, cacheTag: cacheTag) else { return }
+        try? FileManager.default.removeItem(at: TranscriptCache.diskURL(key))
     }
 }
