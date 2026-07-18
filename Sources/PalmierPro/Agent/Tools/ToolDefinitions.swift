@@ -730,9 +730,9 @@ enum ToolDefinitions {
                                     "properties": textBoxTransformProperties(),
                                 ],
                             ], textStyleProperties(detailed: false), [
-                                "animation": ["type": "string", "enum": TextAnimation.Preset.agentValues, "description": "Animation preset; off clears."],
+                                "animation": ["type": "string", "enum": TextAnimation.Preset.agentValues, "description": "Animation preset. Omit for a static clip — text does not animate unless you set this; off also means none."],
                                 "highlightColor": ["type": "string", "description": "Active-word hex."],
-                                "granularity": ["type": "string", "enum": ["word", "char"], "description": "Per-word animation unit. Default word (a CJK word like 重庆 animates as one); char animates each character."],
+                                "granularity": ["type": "string", "enum": ["word", "char"], "description": "Per-word animation unit, applies only when animation is set. Default word (a CJK word like 重庆 animates as one); char animates each character."],
                                 "captionGroupId": ["type": "string", "description": "Join this caption group, or \"none\" to opt out. Omit to default-join the track's group when its clips all share one; a plain text track stays ungrouped."],
                             ]),
                             "required": ["startFrame", "endFrame", "content"],
@@ -761,16 +761,16 @@ enum ToolDefinitions {
                     ],
                     "origin": ["type": "string", "enum": ["user", "resync"], "description": "Optional. Default 'user'. A user content edit that fixes one mis-transcribed term may be auto-promoted into the glossary; pass 'resync' for programmatic caption rewrites to suppress that."],
                 ], textStyleProperties(detailed: true), [
-                    "animation": ["type": "string", "enum": TextAnimation.Preset.agentValues, "description": "Animation preset; off clears."],
+                    "animation": ["type": "string", "enum": TextAnimation.Preset.agentValues, "description": "Animation preset; set to animate (off by default), off clears an existing one. Omit to leave the clip's current animation unchanged."],
                     "highlightColor": ["type": "string", "description": "Active-word hex."],
-                    "granularity": ["type": "string", "enum": ["word", "char"], "description": "Per-word animation unit. Default word (a CJK word like 重庆 animates as one); char animates each character."],
+                    "granularity": ["type": "string", "enum": ["word", "char"], "description": "Per-word animation unit, applies only when animation is set. Default word (a CJK word like 重庆 animates as one); char animates each character."],
                 ]),
                 required: []
             )
         ),
         AgentTool(
             name: .addCaptions,
-            description: "Transcribes the timeline's spoken audio and creates styled caption text clips on their own track — no targeting needed; it finds the spoken content itself. The app uses cloud only when the signed-in account has enough credits for the uncached request; otherwise it uses local transcription. Cloud auto-detects language. Per-word animations are timed from the transcript. Style, transform, and maxWords omitted here fall back to the resolved caption_style profile (typography defaults + position); any param you pass wins. fillerPolicy:'removeAlways' drops only removeAlways-classified filler tokens from the caption TEXT (display only — audio is never cut); caseByCase tokens are never auto-removed. Returns the caption group summary (captionGroupId, clipCount, frameRange, shared style, textPreview) — restyle it later with update_text and that captionGroupId.",
+            description: "Transcribes the timeline's spoken audio and creates styled caption text clips on their own track — no targeting needed; it finds the spoken content itself. The app uses cloud only when the signed-in account has enough credits for the uncached request; otherwise it uses local transcription. Cloud auto-detects language. Captions are static unless you pass `animation`; when set, per-word animations are timed from the transcript. Style, transform, and maxWords omitted here fall back to the resolved caption_style profile (typography defaults + position); any param you pass wins. fillerPolicy:'removeAlways' drops only removeAlways-classified filler tokens from the caption TEXT (display only — audio is never cut); caseByCase tokens are never auto-removed. Returns the caption group summary (captionGroupId, clipCount, frameRange, shared style, textPreview) — restyle it later with update_text and that captionGroupId.",
             inputSchema: objectSchema(
                 properties: mergedProperties([
                     "language": ["type": "string", "description": "BCP-47 speech language. Applies to local only; cloud auto-detects."],
@@ -786,9 +786,9 @@ enum ToolDefinitions {
                     "maxWords": ["type": "integer", "description": "Max words per caption (Latin); for CJK this caps characters per line."],
                     "segmentation": ["type": "string", "enum": CaptionBuilder.Segmentation.allCases.map(\.rawValue), "description": "Default natural: break at sentence/clause punctuation and word boundaries (never mid-word), preferring short lines — the right default for CJK and mixed scripts. fixedChars is the legacy recursive width split."],
                 ], textStyleProperties(detailed: false), [
-                    "animation": ["type": "string", "enum": TextAnimation.Preset.agentValues, "description": "Caption animation preset."],
+                    "animation": ["type": "string", "enum": TextAnimation.Preset.agentValues, "description": "Caption animation preset. Omit for static captions — nothing animates unless you set this."],
                     "highlightColor": ["type": "string", "description": "Active-word hex."],
-                    "granularity": ["type": "string", "enum": ["word", "char"], "description": "Per-word animation unit. Default word (a CJK word like 重庆 animates as one); char animates each character."],
+                    "granularity": ["type": "string", "enum": ["word", "char"], "description": "Per-word animation unit, applies only when animation is set. Default word (a CJK word like 重庆 animates as one); char animates each character."],
                     "fillerPolicy": ["type": "string", "enum": ["off", "removeAlways"], "description": "Default off. 'removeAlways' drops only removeAlways-classified filler tokens from caption text (display only, no audio cut). caseByCase tokens are never auto-removed — see caption_style."],
                 ])
             )

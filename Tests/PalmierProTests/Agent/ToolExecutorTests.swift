@@ -2310,6 +2310,33 @@ struct SetClipPropertiesTests {
         #expect(result.isError == true)
     }
 
+    @Test func addCaptionsWithoutAnimationParsesToNil() throws {
+        // The tool's animation decision for add_captions: absent preset → nil (nothing animates).
+        let h = ToolHarness()
+        let anim = try h.executor.parseTextAnimation(preset: nil, highlightColor: nil, granularity: nil, path: "add_captions")
+        #expect(anim == nil)
+    }
+
+    @Test func addCaptionsGranularityWithoutPresetIsNoAnimation() throws {
+        // Granularity alone must not conjure an animation — it is off unless a preset is given.
+        let h = ToolHarness()
+        let anim = try h.executor.parseTextAnimation(preset: nil, highlightColor: nil, granularity: "char", path: "add_captions")
+        #expect(anim == nil)
+    }
+
+    @Test func addCaptionsExplicitPresetDefaultsWordGranularity() throws {
+        let h = ToolHarness()
+        let anim = try h.executor.parseTextAnimation(preset: "highlightPop", highlightColor: nil, granularity: nil, path: "add_captions")
+        #expect(anim?.preset == .highlightPop)
+        #expect(anim?.granularity == .word)
+    }
+
+    @Test func addCaptionsGranularityCharHonored() throws {
+        let h = ToolHarness()
+        let anim = try h.executor.parseTextAnimation(preset: "highlightPop", highlightColor: nil, granularity: "char", path: "add_captions")
+        #expect(anim?.granularity == .char)
+    }
+
     @Test func updateTextContentRetimesSurvivingWordTimings() async {
         var clip = Fixtures.clip(id: "title", mediaRef: "text", mediaType: .text, start: 0, duration: 60)
         clip.textContent = "old text"

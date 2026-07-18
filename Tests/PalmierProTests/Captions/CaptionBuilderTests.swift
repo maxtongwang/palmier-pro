@@ -102,6 +102,29 @@ struct CaptionBuilderTests {
 
     private let clip = Clip(mediaRef: "m", startFrame: 30, durationFrames: 120)
 
+    @Test func nilAnimationProducesNilSpec() {
+        // Off by default: no animation requested → the generated clip carries no TextAnimation.
+        let p = CaptionBuilder.Phrase(text: "hi", start: 1.0, end: 2.0)
+        let specs = CaptionBuilder.specs(for: [p], sourceClip: clip, trackIndex: 0, fps: 30,
+                                         style: TextStyle(), captionGroupId: "g1", animation: nil)
+        #expect(specs[0].animation == nil)
+    }
+
+    @Test func defaultCaptionRequestHasNoActiveAnimation() {
+        // A request with nothing specified is inactive, so the generation gate attaches nil.
+        let req = EditorViewModel.CaptionRequest(sourceClipIds: [], autoDetect: true)
+        #expect(req.animation.isActive == false)
+    }
+
+    @Test func explicitAnimationDefaultsToWordGranularity() {
+        let p = CaptionBuilder.Phrase(text: "hi", start: 1.0, end: 2.0)
+        let specs = CaptionBuilder.specs(for: [p], sourceClip: clip, trackIndex: 0, fps: 30,
+                                         style: TextStyle(), captionGroupId: "g1",
+                                         animation: TextAnimation(preset: .highlightPop))
+        #expect(specs[0].animation?.preset == .highlightPop)
+        #expect(specs[0].animation?.granularity == .word)
+    }
+
     @Test func carriesWordTimingsAndAnimation() {
         let p = CaptionBuilder.Phrase(text: "hi there", start: 1.0, end: 2.0, words: [
             CaptionBuilder.WordSpan(text: "hi", start: 1.0, end: 1.4),
