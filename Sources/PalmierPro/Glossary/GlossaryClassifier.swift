@@ -93,6 +93,12 @@ enum GlossaryClassifier {
         }
         let v = variant(), c = canonical()
         guard normalize(v) != normalize(c) else { return nil }
+        // Re-apply the rephrase/filler guards to the WIDENED spans, not just the minimal char:
+        // widening a sub-threshold single-char edit can produce an all-common-vocabulary span
+        // (在→再 widening to 在来→再来) that would silently corrupt unrelated text (现在来 → 现再来).
+        // Only a span carrying a non-common, non-filler character earns promotion.
+        if GlossaryCommonWords.isCommonVocabulary(v) || GlossaryCommonWords.isCommonVocabulary(c) { return nil }
+        if GlossaryCommonWords.isAllFiller(v.map(String.init)) || GlossaryCommonWords.isAllFiller(c.map(String.init)) { return nil }
         return Promotion(canonical: c, variant: v)
     }
 

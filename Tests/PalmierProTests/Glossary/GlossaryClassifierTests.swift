@@ -91,6 +91,19 @@ struct GlossaryClassifierTests {
         #expect(GlossaryClassifier.classify(old: "太好吃了", new: "非常好吃") == nil)
     }
 
+    @Test func doesNotPromoteWidenedAllCommonSpan() {
+        // 在→再 widens to 在来→再来 — all common chars. Promoting it would silently corrupt 现在来.
+        #expect(GlossaryClassifier.classify(old: "我在来", new: "我再来") == nil)
+        // 他→她 widens to an all-common span too.
+        #expect(GlossaryClassifier.classify(old: "他说的对", new: "她说的对") == nil)
+    }
+
+    @Test func stillPromotesWidenedSpanWithNonCommonChar() {
+        // The widened-span guard must not block real term fixes: 视/频 and 师/狮 are non-common.
+        #expect(GlossaryClassifier.classify(old: "开视频", new: "拍视频") != nil)
+        #expect(GlossaryClassifier.classify(old: "我的师父", new: "我的狮父") != nil)
+    }
+
     @Test func latinShortVariantNotWidened() {
         // Widening is CJK-only; a sub-threshold Latin substitution (Xe→Xen, 2 chars) stays nil.
         #expect(GlossaryClassifier.classify(old: "Xe", new: "Xen") == nil)
