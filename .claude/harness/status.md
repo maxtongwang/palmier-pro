@@ -6,15 +6,15 @@ North star: judgments made once persist across projects.
 
 ## C1 — caption-style WRITE path + segmentation profile key
 
-| Area         | Change                                                                                                                                                           |
-| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Store        | CaptionStyleStore.writeLayer/readLayer/deepMerge/url(for:) — read-modify-write ONE layer file; provided keys replace, absent untouched, hand-edited keys survive |
-| Model        | CaptionStyleProfile.Typography.segmentation (String?); profile.lintDismissals ([String]); Partial overlay/resolve/jsonObject/from all threaded                   |
-| Tool         | set_caption_style {scope global\|library\|project (default library), typography?, fillers?, protectedPhrases?, provenance?} — ToolExecutor+SetCaptionStyle.swift |
-| Validation   | unknown keys, non-string list elements, absurd typography rejected (fontSize 12–300, position 0–1, maxWords 1–100, segmentation enum) — actionable ToolError     |
-| Segmentation | add_captions/resync_captions honor profile.typography.segmentation when no explicit param; explicit wins; unknown stored value falls back to natural             |
-| Read         | caption_style payload now surfaces typography.segmentation + lintDismissals (+ semantics)                                                                        |
-| Register     | ToolName.setCaptionStyle + dispatch + ToolDefinitions schema (additive, after caption_style; no reorders — wsD ToolDefinitions kept safe)                        |
+| Area         | Change                                                                                                                                                                                                                                                                                                                      |
+| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Store        | CaptionStyleStore.writeLayer/readLayer/deepMerge/url(for:) — read-modify-write ONE layer file; provided keys replace, absent untouched, hand-edited keys survive                                                                                                                                                            |
+| Model        | CaptionStyleProfile.Typography.segmentation (String?); profile.lintDismissals ([String]); Partial overlay/resolve/jsonObject/from all threaded                                                                                                                                                                              |
+| Tool         | set_caption_style {scope global\|library\|project (default library), typography?, fillers?, protectedPhrases?, provenance?} — ToolExecutor+SetCaptionStyle.swift                                                                                                                                                            |
+| Validation   | unknown keys, non-string list elements, absurd typography rejected (fontSize 12–300, position 0–1, maxWords 1–100, segmentation enum) — actionable ToolError                                                                                                                                                                |
+| Segmentation | add_captions/resync_captions honor profile.typography.segmentation when no explicit param; explicit wins; unknown value → natural. Reactive resync (AfterSwap/AfterTrim/ForGlossaryTerm) honors it too — runCaptionResync resolves the profile once per run when segmentation is nil (Evaluator MEDIUM fix, commit 9bd2cb4) |
+| Read         | caption_style payload now surfaces typography.segmentation + lintDismissals (+ semantics)                                                                                                                                                                                                                                   |
+| Register     | ToolName.setCaptionStyle + dispatch + ToolDefinitions schema (additive, after caption_style; no reorders — wsD ToolDefinitions kept safe)                                                                                                                                                                                   |
 
 ## C2 — lint rejection memory (dismiss)
 
