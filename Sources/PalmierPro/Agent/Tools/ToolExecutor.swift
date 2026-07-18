@@ -247,6 +247,7 @@ final class ToolExecutor {
         case .glossaryPromote: return try glossaryPromote(editor, args)
         case .glossaryApply:  return try await glossaryApply(editor, args)
         case .captionStyle:  return try captionStyle(editor, args)
+        case .setCaptionStyle: return try setCaptionStyle(editor, args)
         case .captionLint:   return try await captionLint(editor, args)
         case .resyncCaptions: return try resyncCaptions(editor, args)
         case .exportProject: return try await exportProject(editor, args)

@@ -145,7 +145,7 @@ private struct FixedWordSource: CaptionWordSource {
 // MARK: - Tool wiring (editor + injected completer)
 
 @MainActor
-@Suite(.isolatedGlossaryRoot) struct CaptionLintToolTests {
+@Suite(.isolatedGlossaryRoot, .hermeticCaptionStyle) struct CaptionLintToolTests {
     private func spec(_ text: String, start: Int, duration: Int, group: String) -> EditorViewModel.TextClipSpec {
         var s = EditorViewModel.TextClipSpec(
             trackIndex: 0, startFrame: start, durationFrames: duration,
@@ -171,6 +171,19 @@ private struct FixedWordSource: CaptionWordSource {
               let data = s.data(using: .utf8),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [:] }
         return obj
+    }
+
+    /// Bind a UNIQUE temp library for the body so parallel writer tests don't share the suite's library.
+    private func withFreshLibrary<T>(_ body: () throws -> T) rethrows -> T {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("cs-lib-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        return try CaptionStyleStore.$libraryDirectoryOverride.withValue(dir) { try body() }
+    }
+
+    private func withFreshLibrary<T>(_ body: () async throws -> T) async rethrows -> T {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("cs-lib-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        return try await CaptionStyleStore.$libraryDirectoryOverride.withValue(dir) { try await body() }
     }
 
     @Test func flagsModeSurfacesButDoesNotApply() async throws {
@@ -299,5 +312,73 @@ private struct FixedWordSource: CaptionWordSource {
         let out = body(try await exec.captionLint(e, ["mode": "flags"], completer: FailingCompleter()))
         #expect((out["flags"] as? [[String: Any]])?.isEmpty ?? true)
         #expect(out["note"] != nil)
+    }
+
+    // MARK: - Reject-path persistence (dismiss)
+
+    @Test func dismissPersistsToLibraryFileAndAppends() throws {
+        // Writes to a temp library scope — CaptionStyleStore.libraryURL, isolated per test.
+        try withFreshLibrary {
+            let e = editorWithCaptions([("我在看视频呢", 0, 40)])
+            let exec = ToolExecutor(editor: e)
+
+            let out1 = body(try exec.dismissLintTerm(e, ["original": "视频"]))
+            #expect(out1["dismissed"] as? String == "视频")
+            #expect(out1["lintDismissals"] as? [String] == ["视频"])
+            #expect(out1["warning"] == nil)  // 2 CJK chars is distinctive, not broad
+
+            // A different term appends; re-dismissing an existing one is idempotent.
+            _ = try exec.dismissLintTerm(e, ["original": "开视频"])
+            let out3 = body(try exec.dismissLintTerm(e, ["original": "视频"]))
+            #expect((out3["lintDismissals"] as? [String])?.sorted() == ["开视频", "视频"].sorted())
+
+            // Persisted to the profile file itself.
+            let onDisk = CaptionStyleStore.readLayer(at: CaptionStyleStore.libraryURL)["lintDismissals"] as? [String]
+            #expect(onDisk?.sorted() == ["开视频", "视频"].sorted())
+        }
+    }
+
+    @Test func dismissRequiresOriginal() throws {
+        let e = editorWithCaptions([("我在看视频呢", 0, 40)])
+        let exec = ToolExecutor(editor: e)
+        #expect(throws: (any Error).self) {
+            try exec.dismissLintTerm(e, ["reason": "no original"])
+        }
+    }
+
+    @Test func dismissedTermSuppressesSameFlagOnNextRun() async throws {
+        // End-to-end: dismiss writes the library scope, then the same stubbed flag is suppressed on the
+        // next run because library dismissals feed lintExclusions. Library is an isolated temp dir.
+        try await withFreshLibrary {
+            let e = editorWithCaptions([("我在看视频呢", 0, 40)])  // projectURL nil → resolve reads library
+            let target = clipId(e, text: "我在看视频呢")
+            let exec = ToolExecutor(editor: e)
+            _ = try exec.dismissLintTerm(e, ["original": "视频"])
+
+            let stub = StubCompleter(response: """
+            [{"clipId":"\(target)","original":"视频","suggestion":"视屏","reason":"x","confidence":0.9}]
+            """)
+            let out = body(try await exec.captionLint(e, ["mode": "flags"], completer: stub))
+            #expect((out["flags"] as? [[String: Any]])?.isEmpty ?? true)
+            #expect((out["dismissedCount"] as? Int ?? 0) >= 1)
+        }
+    }
+
+    @Test func captionStyleReadListsDismissals() throws {
+        try withFreshLibrary {
+            let e = editorWithCaptions([("我在看视频呢", 0, 40)])
+            let exec = ToolExecutor(editor: e)
+            _ = try exec.dismissLintTerm(e, ["original": "视频"])
+            _ = try exec.dismissLintTerm(e, ["original": "开视频"])
+            let out = body(try exec.captionStyle(e, [:]))
+            #expect((out["lintDismissals"] as? [String])?.sorted() == ["开视频", "视频"].sorted())
+        }
+    }
+
+    @Test func shortDismissalWarnsButLongOneDoesNot() {
+        #expect(ToolExecutor.shortDismissalWarning("啊") != nil)    // single CJK char — broad
+        #expect(ToolExecutor.shortDismissalWarning("ok") != nil)     // 2 Latin letters — broad
+        #expect(ToolExecutor.shortDismissalWarning("视频") == nil)   // 2 CJK chars — distinctive
+        #expect(ToolExecutor.shortDismissalWarning("okay") == nil)   // 4 Latin letters — distinctive
     }
 }

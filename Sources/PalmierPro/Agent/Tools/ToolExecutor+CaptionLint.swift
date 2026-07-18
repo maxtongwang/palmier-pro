@@ -8,6 +8,7 @@ import Foundation
 extension ToolExecutor {
     private static let captionLintAllowedKeys: Set<String> = [
         "startFrame", "endFrame", "clipId", "mode", "autoApplyThreshold", "afterClipId",
+        "action", "original", "reason",
     ]
     static let captionLintMaxWindows = 200
 
@@ -19,6 +20,13 @@ extension ToolExecutor {
     /// unreachable and flags mode degrades to context.
     func captionLint(_ editor: EditorViewModel, _ args: [String: Any], completer: LintCompleter?) async throws -> ToolResult {
         try validateUnknownKeys(args, allowed: Self.captionLintAllowedKeys, path: "caption_lint")
+
+        if let action = args.string("action") {
+            guard action == "dismiss" else {
+                throw ToolError("caption_lint.action: only 'dismiss' is supported.")
+            }
+            return try dismissLintTerm(editor, args)
+        }
 
         let mode: CaptionLinter.Mode
         if let raw = args.string("mode") {
@@ -69,10 +77,15 @@ extension ToolExecutor {
         }
 
         let exclusions = Self.lintExclusions(editor)
+        let dismissedCount = CaptionLinter.maskedCount(windows: windows, exclusions: Self.lintDismissalExclusions(editor))
         var payload: [String: Any] = [
             "lintSource": "captions",
             "skippedExclusions": CaptionLinter.maskedCount(windows: windows, exclusions: exclusions),
         ]
+        if dismissedCount > 0 {
+            payload["dismissedCount"] = dismissedCount
+            payload["dismissedNote"] = "\(dismissedCount) dismissed term occurrence(s) in these windows are shielded from re-flagging (caption_lint action:dismiss)."
+        }
         if let nextClipId {
             payload["nextClipId"] = nextClipId
             payload["windowsNote"] = "First \(windows.count) of \(remainingWindows) remaining caption windows. Continue with afterClipId = nextClipId."
@@ -165,7 +178,64 @@ extension ToolExecutor {
         terms.append(contentsOf: profile.fillers.caseByCase)
         terms.append(contentsOf: profile.fillers.neverRemove)
         terms.append(contentsOf: profile.protectedPhrases)
+        terms.append(contentsOf: profile.lintDismissals)
         return LintExclusions(terms: terms)
+    }
+
+    /// Dismissed surface forms only — used to report how many are shielding the linted windows,
+    /// separate from the glossary/filler terms other stages own.
+    static func lintDismissalExclusions(_ editor: EditorViewModel) -> LintExclusions {
+        let dismissals = CaptionStyleStore.resolve(projectPackageURL: editor.projectURL).profile.lintDismissals
+        return LintExclusions(terms: dismissals)
+    }
+
+    // MARK: - Dismiss (reject-path persistence)
+
+    /// Persist a confirmed-correct surface form so caption_lint stops re-surfacing it. Writes to the
+    /// caption-style profile at LIBRARY scope (crosses projects), reusing the set_caption_style write
+    /// machinery. Read-modify-write of just that layer's lintDismissals list.
+    func dismissLintTerm(_ editor: EditorViewModel, _ args: [String: Any]) throws -> ToolResult {
+        guard let raw = args.string("original")?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else {
+            throw ToolError("caption_lint: action 'dismiss' requires a non-empty 'original' — the caption surface form that is actually correct.")
+        }
+
+        let url = CaptionStyleStore.libraryURL
+        let existing = CaptionStyleStore.readLayer(at: url)
+        var dismissals = (existing["lintDismissals"] as? [Any])?.compactMap { $0 as? String } ?? []
+        let alreadyPresent = dismissals.contains(raw)
+        if !alreadyPresent { dismissals.append(raw) }
+
+        do {
+            try CaptionStyleStore.writeLayer(["lintDismissals": dismissals], at: url)
+        } catch {
+            return .error(error.localizedDescription)
+        }
+
+        var payload: [String: Any] = [
+            "action": "dismiss",
+            "dismissed": raw,
+            "scope": CaptionStyleStore.Scope.library.rawValue,
+            "lintDismissals": dismissals,
+            "dismissedTotal": dismissals.count,
+            "note": alreadyPresent
+                ? "'\(raw)' was already dismissed at library scope; no change. caption_lint will not flag it in any project."
+                : "Dismissed '\(raw)' at library scope. caption_lint will no longer flag it in any project.",
+        ]
+        if let warning = Self.shortDismissalWarning(raw) { payload["warning"] = warning }
+        if let reason = args.string("reason") { payload["reason"] = reason }
+        return .ok(Self.jsonString(payload) ?? "{}")
+    }
+
+    /// Warn (never block) when a dismissed surface form is short enough to suppress broadly — a single
+    /// CJK character or a 1–2 char Latin token would mask many unrelated corrections.
+    static func shortDismissalWarning(_ term: String) -> String? {
+        guard !CaptionText.tokens(term).map(CaptionText.matchKey).allSatisfy(\.isEmpty) else { return nil }
+        // CJK ideographs also report isAlphabetic, so count them separately from Latin letters/digits.
+        let cjk = term.unicodeScalars.filter(CaptionText.isCJK).count
+        let latin = term.unicodeScalars.filter { !CaptionText.isCJK($0) && ($0.properties.isAlphabetic || ("0"..."9").contains($0)) }.count
+        let broad = cjk == 0 ? (latin > 0 && latin < 3) : (cjk <= 1 && latin == 0)
+        guard broad else { return nil }
+        return "'\(term)' is very short — it will shield every caption line containing it from lint. Dismiss longer, distinctive surface forms when possible."
     }
 
     // MARK: - Apply (opt-in)

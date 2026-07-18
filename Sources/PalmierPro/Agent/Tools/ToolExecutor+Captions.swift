@@ -6,13 +6,18 @@ extension ToolExecutor {
         "style", "transform", "censorProfanity", "language", "animation", "highlightColor", "granularity", "maxWords", "fillerPolicy", "segmentation",
     ])
 
-    /// Parse the shared `segmentation` param (add_captions / resync_captions). Defaults to natural.
-    func parseSegmentation(_ raw: String?, path: String) throws -> CaptionBuilder.Segmentation {
-        guard let raw else { return .default }
-        guard let mode = CaptionBuilder.Segmentation(rawValue: raw) else {
-            throw ToolError("\(path): invalid segmentation '\(raw)'. Expected 'natural' or 'fixedChars'.")
+    /// Resolve the shared `segmentation` param (add_captions / resync_captions). An explicit param
+    /// always wins; otherwise the resolved profile's typography.segmentation is honored; otherwise
+    /// the built-in natural default. An unknown profile value (hand-edited) falls back to natural.
+    func parseSegmentation(_ raw: String?, profileDefault: String? = nil, path: String) throws -> CaptionBuilder.Segmentation {
+        if let raw {
+            guard let mode = CaptionBuilder.Segmentation(rawValue: raw) else {
+                throw ToolError("\(path): invalid segmentation '\(raw)'. Expected 'natural' or 'fixedChars'.")
+            }
+            return mode
         }
-        return mode
+        if let profileDefault, let mode = CaptionBuilder.Segmentation(rawValue: profileDefault) { return mode }
+        return .default
     }
 
     func addCaptions(_ editor: EditorViewModel, _ args: [String: Any]) async throws -> ToolResult {
@@ -49,7 +54,7 @@ extension ToolExecutor {
         }
 
         let fillerPolicy = try parseFillerPolicy(args.string("fillerPolicy"), path: "add_captions")
-        let segmentation = try parseSegmentation(args.string("segmentation"), path: "add_captions")
+        let segmentation = try parseSegmentation(args.string("segmentation"), profileDefault: profile.typography.segmentation, path: "add_captions")
 
         let context = try await transcriptionContext(args, path: "add_captions", preference: editor.transcriptionPreference) {
             await editor.captionCloudCreditCost(for: .init(autoDetect: true, provider: .cloud))

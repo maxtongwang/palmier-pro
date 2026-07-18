@@ -1,26 +1,54 @@
-# feature/glossary-persistence — Status
+# feature/style-lint-persistence — Status
 
-Phase 2 complete. Ready for Evaluator. Full `swift build` + full `swift test` green (1266/1266).
+Phase 2 complete. Ready for Evaluator. Branch off fork main 0e3133f. 3 commits (C1, C2, C3).
 
-| Item | Change                                                                                                                                                 |
-| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| B1a  | promoteCaptionEdit retargets project -> library scope (cross-project reuse)                                                                            |
-| B1b  | glossary.json preserved across save-as/duplicate; Project.glossaryFilename const                                                                       |
-| B1c  | glossary_promote tool (move up scope, higher-precedence wins collision); pure GlossaryPromotion planner; schema + dispatch                             |
-| B1d  | glossary_list notes asserted project-scope terms -> promote                                                                                            |
-| B2   | Classifier widens sub-threshold CJK variant to enclosing NLTokenizer word (开视频->拍视频 promotes); CJK-only; common-vocab guard on minimal span kept |
-| B3   | Corrector enforces Latin word boundaries on the Latin edges of mixed-script variants (AI技术 no longer corrupts OpenAI技术)                            |
-| B4a  | Whitespace-only variants rejected in sanitize (read+write) + corrector skips blank                                                                     |
-| B4b  | Deterministic lexicographic-canonical tie-break for shared variants (match list + word-span lookup)                                                    |
+North star: judgments made once persist across projects.
 
-Decisions:
+## C1 — caption-style WRITE path + segmentation profile key
 
-- Added `@TaskLocal GlossaryScope.sharedRootOverride` (nil in production) so the library (~~/Documents) and global (~~/.config) roots are injectable for tests. A `TestScoping` trait `.isolatedGlossaryRoot` binds it to a fresh temp dir per test (recursive), applied to the Glossary, Glossary tools, and CaptionLint tool suites so EVERY glossary read and write hits an isolated root, never $HOME. Verified: glossary paths absent after two full runs. Gave the CaptionLint autoApply test a FixedWordSource so the post-promotion resync rebuilds instead of clearing (no transcript in that unit).
-- glossary_promote is a MOVE (writes toScope, removes from fromScope); collision resolved by scope precedence (promoted wins when its scope is higher precedence).
+| Area         | Change                                                                                                                                                                                                                                                                                                                      |
+| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Store        | CaptionStyleStore.writeLayer/readLayer/deepMerge/url(for:) — read-modify-write ONE layer file; provided keys replace, absent untouched, hand-edited keys survive                                                                                                                                                            |
+| Model        | CaptionStyleProfile.Typography.segmentation (String?); profile.lintDismissals ([String]); Partial overlay/resolve/jsonObject/from all threaded                                                                                                                                                                              |
+| Tool         | set_caption_style {scope global\|library\|project (default library), typography?, fillers?, protectedPhrases?, provenance?} — ToolExecutor+SetCaptionStyle.swift                                                                                                                                                            |
+| Validation   | unknown keys, non-string list elements, absurd typography rejected (fontSize 12–300, position 0–1, maxWords 1–100, segmentation enum) — actionable ToolError                                                                                                                                                                |
+| Segmentation | add_captions/resync_captions honor profile.typography.segmentation when no explicit param; explicit wins; unknown value → natural. Reactive resync (AfterSwap/AfterTrim/ForGlossaryTerm) honors it too — runCaptionResync resolves the profile once per run when segmentation is nil (Evaluator MEDIUM fix, commit 9bd2cb4) |
+| Read         | caption_style payload now surfaces typography.segmentation + lintDismissals (+ semantics)                                                                                                                                                                                                                                   |
+| Register     | ToolName.setCaptionStyle + dispatch + ToolDefinitions schema (additive, after caption_style; no reorders — wsD ToolDefinitions kept safe)                                                                                                                                                                                   |
 
-Deviations:
+## C2 — lint rejection memory (dismiss)
 
-- Updated the classifier test `doesNotPromoteUnsafeShortVariant` (我的师父->我的狮父) — with B2 it now widens and promotes (师父->狮父); added a no-context nil case (师->狮) in its place.
+| Area      | Change                                                                                                                                                |
+| --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Tool      | caption_lint {action:"dismiss", original, reason?} — appends confirmed-correct surface form to lintDismissals at LIBRARY scope, reusing C1 writeLayer |
+| Masking   | lintExclusions folds profile.lintDismissals → dismissed terms masked exactly like protectedPhrases (diff-based on CHANGED tokens)                     |
+| Report    | response gains dismissedCount + dismissedNote when dismissed terms present in linted windows                                                          |
+| Guard     | shortDismissalWarning — non-blocking warning for lone CJK char / 1–2 Latin letters (suppresses broadly); does not block                               |
+| Read      | dismissals listed in caption_style response (lintDismissals)                                                                                          |
+| Test seam | dismissLintTerm(libraryURL:) injectable (mirrors completer injection) so tests never touch the real ~/Documents library                               |
+
+## C3 — cloud decoder-bias investigation
+
+Outcome: NO — not deliverable. TranscriptionBackend.submit's Convex `transcriptions:submit` action exposes
+no prompt/phrase-hint/vocabulary field, so GlossaryStore.hotwordTerms() cannot bias the cloud decoder without
+a backend protocol change (out of scope). Local sherpa still biases via TranscriptionBias.hotwordsCSV. Added a
+one-line doc comment at the request site; no cache-key change (nothing bias-dependent varies in the cloud payload).
+
+## Verification
+
+- `swift build` — clean. `swift test` (full) — 1258/1258 pass (was 1224 on caption-lint base; +34 net incl. new suites).
+- New tests: CaptionStyleTests +6 (partial-merge without clobber, array-replace/object-merge, layered resolve,
+  set_caption_style write+read, validation failures, segmentation default+explicit-wins). CaptionLintTests +5
+  (dismiss persist+append, dismiss requires original, dismissed term suppressed next run, caption_style lists
+  dismissals, short-dismissal warning).
+- Hermetic test seam: CaptionStyleStore.@TaskLocal globalDirectoryOverride/libraryDirectoryOverride
+  (CaptionStyleStore.swift:25-26) + HermeticCaptionStyle TestScoping trait on the CaptionStyle/CaptionLintTool
+  suites pin all caption-style/lint tests off the real ~/.config/caption-style and ~/Documents/Palmier Pro.
+  Writer tests bind a unique temp library each (withFreshLibrary). Verified: both real paths absent after a
+  full run. Dropped the test-only libraryURL: param from dismissLintTerm (store seam replaces it).
+- Pre-existing flake NOT from this branch: FrameSamplerTests.detectsScenesAndHonorsCoverageFloor flakes under
+  parallel load (passes alone, not in diff). The earlier glossary-file caption pollution is resolved for
+  caption-style by this seam; the glossary store's own seam is a sibling builder's task.
 
 ---
 

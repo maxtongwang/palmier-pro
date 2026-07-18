@@ -11,6 +11,8 @@ struct CaptionStyleProfile: Codable, Equatable, Sendable {
     var protectedPhrases: [String]
     var typography: Typography
     var provenance: [String: String]
+    /// Surface forms the user confirmed CORRECT via caption_lint dismiss — never re-flagged by lint.
+    var lintDismissals: [String] = []
 
     struct Fillers: Codable, Equatable, Sendable {
         /// Safe to strip mechanically.
@@ -38,6 +40,10 @@ struct CaptionStyleProfile: Codable, Equatable, Sendable {
         var shadow: Bool? = nil
         var position: Position? = nil
         var maxWords: Int? = nil
+        /// Caption line-breaking default ("natural" | "fixedChars"). Honored by add_captions /
+        /// resync_captions when no explicit segmentation param is passed. Stored as a raw string so
+        /// the profile stays decoupled from CaptionBuilder; an unknown value falls back to natural.
+        var segmentation: String? = nil
     }
 
     /// Normalized 0–1 caption box center.
@@ -57,7 +63,8 @@ struct CaptionStyleProfile: Codable, Equatable, Sendable {
         ),
         protectedPhrases: [],
         typography: Typography(),
-        provenance: [:]
+        provenance: [:],
+        lintDismissals: []
     )
 }
 
@@ -74,6 +81,7 @@ struct CaptionStyleProfilePartial: Equatable {
     var protectedPhrases: [String]?
     var typography: CaptionStyleProfile.Typography?
     var provenance: [String: String]?
+    var lintDismissals: [String]?
 
     /// Later layer's provided keys replace earlier wholesale; absent keys inherit.
     /// Typography merges per individual key; provenance unions (later wins).
@@ -88,6 +96,7 @@ struct CaptionStyleProfilePartial: Equatable {
         if let x = o.protectedPhrases { r.protectedPhrases = x }
         r.typography = Self.overlayTypography(base: r.typography, over: o.typography)
         if let x = o.provenance { r.provenance = (r.provenance ?? [:]).merging(x) { _, new in new } }
+        if let x = o.lintDismissals { r.lintDismissals = x }
         return r
     }
 
@@ -104,7 +113,8 @@ struct CaptionStyleProfilePartial: Equatable {
             outline: over.outline ?? base.outline,
             shadow: over.shadow ?? base.shadow,
             position: over.position ?? base.position,
-            maxWords: over.maxWords ?? base.maxWords
+            maxWords: over.maxWords ?? base.maxWords,
+            segmentation: over.segmentation ?? base.segmentation
         )
     }
 
@@ -122,7 +132,8 @@ struct CaptionStyleProfilePartial: Equatable {
             ),
             protectedPhrases: protectedPhrases ?? [],
             typography: typography ?? CaptionStyleProfile.Typography(),
-            provenance: provenance ?? [:]
+            provenance: provenance ?? [:],
+            lintDismissals: lintDismissals ?? []
         )
     }
 
@@ -137,6 +148,7 @@ struct CaptionStyleProfilePartial: Equatable {
         protectedPhrases = profile.protectedPhrases
         typography = profile.typography
         provenance = profile.provenance
+        lintDismissals = profile.lintDismissals
     }
 
     init() {}
@@ -166,12 +178,14 @@ struct CaptionStyleProfilePartial: Equatable {
                 outline: typo.csBool("outline"),
                 shadow: typo.csBool("shadow"),
                 position: position,
-                maxWords: typo.csInt("maxWords")
+                maxWords: typo.csInt("maxWords"),
+                segmentation: typo.csString("segmentation")
             )
         }
         if let prov = obj["provenance"] as? [String: Any] {
             provenance = prov.compactMapValues { $0 as? String }
         }
+        lintDismissals = obj.csStringArrayIfPresent("lintDismissals")
     }
 }
 

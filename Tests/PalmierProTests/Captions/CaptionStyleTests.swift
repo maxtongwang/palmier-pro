@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import PalmierPro
 
-@Suite("CaptionStyle")
+@Suite("CaptionStyle", .hermeticCaptionStyle)
 struct CaptionStyleTests {
     // MARK: - Filler classification & planning
 
@@ -198,6 +198,106 @@ struct CaptionStyleTests {
         #expect(style.fontName == originalFont)
     }
 
+    // MARK: - Single-layer write (set_caption_style machinery)
+
+    @Test func partialWriteMergesOneLayerWithoutClobbering() throws {
+        let url = tempFileURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        // Seed with fillers, one typography key, and a hand-edited unknown key.
+        let seed = #"{"fillers":{"removeAlways":["呃"]},"typography":{"fontName":"Georgia"},"handEdited":true}"#
+        try seed.data(using: .utf8)!.write(to: url)
+
+        // Write only typography.fontSize — everything else must survive untouched.
+        try CaptionStyleStore.writeLayer(["typography": ["fontSize": 80]], at: url)
+
+        let after = CaptionStyleStore.readLayer(at: url)
+        let typo = after["typography"] as? [String: Any]
+        #expect(typo?["fontName"] as? String == "Georgia")                 // untouched
+        #expect((typo?["fontSize"] as? NSNumber)?.intValue == 80)          // added
+        #expect((after["fillers"] as? [String: Any])?["removeAlways"] as? [String] == ["呃"])  // untouched
+        #expect(after["handEdited"] as? Bool == true)                      // hand edit preserved
+    }
+
+    @Test func writeLayerReplacesArraysWholesaleMergesObjects() throws {
+        let url = tempFileURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        try #"{"protectedPhrases":["a","b"],"typography":{"fontName":"Georgia","fontSize":40}}"#
+            .data(using: .utf8)!.write(to: url)
+
+        try CaptionStyleStore.writeLayer([
+            "protectedPhrases": ["c"],           // array replaces
+            "typography": ["fontSize": 90],      // object merges per key
+        ], at: url)
+
+        let after = CaptionStyleStore.readLayer(at: url)
+        #expect(after["protectedPhrases"] as? [String] == ["c"])
+        let typo = after["typography"] as? [String: Any]
+        #expect(typo?["fontName"] as? String == "Georgia")
+        #expect((typo?["fontSize"] as? NSNumber)?.intValue == 90)
+    }
+
+    @Test func writtenLayerResolvesThroughLayering() throws {
+        let pkg = try makeTempPackage()
+        defer { try? FileManager.default.removeItem(at: pkg) }
+        let url = try #require(CaptionStyleStore.projectURL(package: pkg))
+        try CaptionStyleStore.writeLayer(["typography": ["segmentation": "fixedChars"]], at: url)
+
+        let resolved = CaptionStyleStore.resolve(projectPackageURL: pkg)
+        #expect(resolved.profile.typography.segmentation == "fixedChars")
+    }
+
+    @MainActor
+    @Test func setCaptionStyleWritesProjectLayerAndReadReflects() throws {
+        let pkg = try makeTempPackage()
+        defer { try? FileManager.default.removeItem(at: pkg) }
+        let e = EditorViewModel()
+        e.projectURL = pkg
+        let exec = ToolExecutor(editor: e)
+
+        _ = try exec.setCaptionStyle(e, [
+            "scope": "project",
+            "typography": ["segmentation": "fixedChars", "fontSize": 80],
+            "protectedPhrases": ["兄弟牛逼"],
+        ])
+
+        let read = body(try exec.captionStyle(e, [:]))
+        let typo = read["typography"] as? [String: Any]
+        #expect(typo?["segmentation"] as? String == "fixedChars")
+        #expect((typo?["fontSize"] as? NSNumber)?.intValue == 80)
+        #expect((read["protectedPhrases"] as? [String])?.contains("兄弟牛逼") == true)
+    }
+
+    @MainActor
+    @Test func setCaptionStyleValidationFailuresAreActionable() throws {
+        let pkg = try makeTempPackage()
+        defer { try? FileManager.default.removeItem(at: pkg) }
+        let e = EditorViewModel()
+        e.projectURL = pkg
+        let exec = ToolExecutor(editor: e)
+
+        #expect(throws: (any Error).self) { try exec.setCaptionStyle(e, ["scope": "project", "typography": ["fontSize": 5000]]) }
+        #expect(throws: (any Error).self) { try exec.setCaptionStyle(e, ["scope": "project", "typography": ["segmentation": "spiral"]]) }
+        #expect(throws: (any Error).self) { try exec.setCaptionStyle(e, ["scope": "project", "protectedPhrases": [123]]) }
+        #expect(throws: (any Error).self) { try exec.setCaptionStyle(e, ["scope": "project", "bogusKey": true]) }
+        #expect(throws: (any Error).self) { try exec.setCaptionStyle(e, ["scope": "project", "typography": ["weird": 1]]) }
+        #expect(throws: (any Error).self) { try exec.setCaptionStyle(e, ["scope": "project"]) }  // nothing to write
+    }
+
+    // MARK: - Segmentation profile default
+
+    @MainActor
+    @Test func segmentationProfileDefaultHonoredAndExplicitWins() throws {
+        let exec = ToolExecutor(editor: EditorViewModel())
+        // Profile default is honored when no explicit param is passed.
+        #expect(try exec.parseSegmentation(nil, profileDefault: "fixedChars", path: "t") == .fixedChars)
+        // Explicit param always wins over the profile default.
+        #expect(try exec.parseSegmentation("natural", profileDefault: "fixedChars", path: "t") == .natural)
+        // No explicit, no profile → built-in natural default.
+        #expect(try exec.parseSegmentation(nil, profileDefault: nil, path: "t") == .default)
+        // A hand-edited unknown profile value falls back to natural rather than throwing.
+        #expect(try exec.parseSegmentation(nil, profileDefault: "garbage", path: "t") == .default)
+    }
+
     // MARK: - Helpers
 
     private func makeTempPackage() throws -> URL {
@@ -205,5 +305,17 @@ struct CaptionStyleTests {
             .appendingPathComponent("caption-style-test-\(UUID().uuidString).palmier", isDirectory: true)
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url
+    }
+
+    private func tempFileURL() -> URL {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent("caption-style-layer-\(UUID().uuidString).json", isDirectory: false)
+    }
+
+    private func body(_ result: ToolResult) -> [String: Any] {
+        guard case .text(let s)? = result.content.first,
+              let data = s.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [:] }
+        return obj
     }
 }
