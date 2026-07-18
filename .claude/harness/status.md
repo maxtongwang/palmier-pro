@@ -1,3 +1,52 @@
+# feature/style-lint-persistence — Status
+
+Phase 2 complete. Ready for Evaluator. Branch off fork main 0e3133f. 3 commits (C1, C2, C3).
+
+North star: judgments made once persist across projects.
+
+## C1 — caption-style WRITE path + segmentation profile key
+
+| Area         | Change                                                                                                                                                           |
+| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Store        | CaptionStyleStore.writeLayer/readLayer/deepMerge/url(for:) — read-modify-write ONE layer file; provided keys replace, absent untouched, hand-edited keys survive |
+| Model        | CaptionStyleProfile.Typography.segmentation (String?); profile.lintDismissals ([String]); Partial overlay/resolve/jsonObject/from all threaded                   |
+| Tool         | set_caption_style {scope global\|library\|project (default library), typography?, fillers?, protectedPhrases?, provenance?} — ToolExecutor+SetCaptionStyle.swift |
+| Validation   | unknown keys, non-string list elements, absurd typography rejected (fontSize 12–300, position 0–1, maxWords 1–100, segmentation enum) — actionable ToolError     |
+| Segmentation | add_captions/resync_captions honor profile.typography.segmentation when no explicit param; explicit wins; unknown stored value falls back to natural             |
+| Read         | caption_style payload now surfaces typography.segmentation + lintDismissals (+ semantics)                                                                        |
+| Register     | ToolName.setCaptionStyle + dispatch + ToolDefinitions schema (additive, after caption_style; no reorders — wsD ToolDefinitions kept safe)                        |
+
+## C2 — lint rejection memory (dismiss)
+
+| Area      | Change                                                                                                                                                |
+| --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Tool      | caption_lint {action:"dismiss", original, reason?} — appends confirmed-correct surface form to lintDismissals at LIBRARY scope, reusing C1 writeLayer |
+| Masking   | lintExclusions folds profile.lintDismissals → dismissed terms masked exactly like protectedPhrases (diff-based on CHANGED tokens)                     |
+| Report    | response gains dismissedCount + dismissedNote when dismissed terms present in linted windows                                                          |
+| Guard     | shortDismissalWarning — non-blocking warning for lone CJK char / 1–2 Latin letters (suppresses broadly); does not block                               |
+| Read      | dismissals listed in caption_style response (lintDismissals)                                                                                          |
+| Test seam | dismissLintTerm(libraryURL:) injectable (mirrors completer injection) so tests never touch the real ~/Documents library                               |
+
+## C3 — cloud decoder-bias investigation
+
+Outcome: NO — not deliverable. TranscriptionBackend.submit's Convex `transcriptions:submit` action exposes
+no prompt/phrase-hint/vocabulary field, so GlossaryStore.hotwordTerms() cannot bias the cloud decoder without
+a backend protocol change (out of scope). Local sherpa still biases via TranscriptionBias.hotwordsCSV. Added a
+one-line doc comment at the request site; no cache-key change (nothing bias-dependent varies in the cloud payload).
+
+## Verification
+
+- `swift build` — clean. `swift test` (full) — 1258/1258 pass (was 1224 on caption-lint base; +34 net incl. new suites).
+- New tests: CaptionStyleTests +6 (partial-merge without clobber, array-replace/object-merge, layered resolve,
+  set_caption_style write+read, validation failures, segmentation default+explicit-wins). CaptionLintTests +5
+  (dismiss persist+append, dismiss requires original, dismissed term suppressed next run, caption_style lists
+  dismissals, short-dismissal warning).
+- Pre-existing flakes seen during runs, NOT from this branch: (1) a stale `~/Documents/Palmier Pro/glossary.json`
+  left by the glossary suite pollutes caption-lint exclusions when present — clear it before running; (2)
+  FrameSamplerTests.detectsScenesAndHonorsCoverageFloor flakes under parallel load (passes alone, not in diff).
+
+---
+
 # feature/caption-lint — Status
 
 Phase 2 complete. Ready for Evaluator.
