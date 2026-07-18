@@ -5,7 +5,7 @@ import Foundation
 import Testing
 @testable import PalmierPro
 
-@Suite("Glossary")
+@Suite("Glossary", .isolatedGlossaryRoot)
 struct GlossaryTests {
     private func corrector(_ terms: [GlossaryTerm]) -> GlossaryCorrector {
         GlossaryCorrector(terms: terms)
@@ -320,20 +320,12 @@ struct GlossaryTests {
 }
 
 /// Tool-level glossary_promote / glossary_list behaviour that needs a live ToolExecutor.
-@Suite("Glossary tools")
+@Suite("Glossary tools", .isolatedGlossaryRoot)
 @MainActor
 struct GlossaryToolTests {
     private func makeProject() throws -> URL {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("gloss-tool-\(UUID().uuidString).palmier", isDirectory: true)
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir
-    }
-
-    /// A unique, isolated library/global root so promotion writes never touch the real user files.
-    private func makeSharedRoot() throws -> URL {
-        let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("gloss-shared-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }
@@ -344,46 +336,40 @@ struct GlossaryToolTests {
 
     @Test func listNotesAssertedProjectScopeTerms() async throws {
         let dir = try makeProject()
-        let shared = try makeSharedRoot()
-        defer { try? FileManager.default.removeItem(at: dir); try? FileManager.default.removeItem(at: shared) }
-        try await GlossaryScope.$sharedRootOverride.withValue(shared) {
-            let canonical = "Prj\(UUID().uuidString.prefix(6))"
-            try GlossaryStore.write(
-                GlossaryDocument(terms: [term(canonical, ["variantone"], confidence: .asserted)]),
-                scope: .project, projectURL: dir
-            )
-            let h = ToolHarness()
-            h.editor.projectURL = dir
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let canonical = "Prj\(UUID().uuidString.prefix(6))"
+        try GlossaryStore.write(
+            GlossaryDocument(terms: [term(canonical, ["variantone"], confidence: .asserted)]),
+            scope: .project, projectURL: dir
+        )
+        let h = ToolHarness()
+        h.editor.projectURL = dir
 
-            let payload = try await h.runOK("glossary_list") as? [String: Any]
-            let note = payload?["note"] as? String
-            #expect(note?.contains("asserted project-scope term") == true)
-            #expect(note?.contains("glossary_promote") == true)
-        }
+        let payload = try await h.runOK("glossary_list") as? [String: Any]
+        let note = payload?["note"] as? String
+        #expect(note?.contains("asserted project-scope term") == true)
+        #expect(note?.contains("glossary_promote") == true)
     }
 
     @Test func promoteMovesTermFromProjectToLibrary() async throws {
         let dir = try makeProject()
-        let shared = try makeSharedRoot()
-        defer { try? FileManager.default.removeItem(at: dir); try? FileManager.default.removeItem(at: shared) }
-        try await GlossaryScope.$sharedRootOverride.withValue(shared) {
-            let canonical = "Lib\(UUID().uuidString.prefix(6))"
-            try GlossaryStore.write(
-                GlossaryDocument(terms: [term(canonical, ["variantone"], confidence: .asserted)]),
-                scope: .project, projectURL: dir
-            )
-            let h = ToolHarness()
-            h.editor.projectURL = dir
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let canonical = "Lib\(UUID().uuidString.prefix(6))"
+        try GlossaryStore.write(
+            GlossaryDocument(terms: [term(canonical, ["variantone"], confidence: .asserted)]),
+            scope: .project, projectURL: dir
+        )
+        let h = ToolHarness()
+        h.editor.projectURL = dir
 
-            let payload = try await h.runOK("glossary_promote", args: ["canonical": canonical]) as? [String: Any]
-            #expect(payload?["count"] as? Int == 1)
-            #expect(payload?["toScope"] as? String == "library")
+        let payload = try await h.runOK("glossary_promote", args: ["canonical": canonical]) as? [String: Any]
+        #expect(payload?["count"] as? Int == 1)
+        #expect(payload?["toScope"] as? String == "library")
 
-            // Landed in library, gone from project.
-            let lib = try GlossaryStore.read(scope: .library, projectURL: dir)
-            #expect(lib.terms.contains { $0.canonical == canonical })
-            let project = try GlossaryStore.read(scope: .project, projectURL: dir)
-            #expect(!project.terms.contains { $0.canonical == canonical })
-        }
+        // Landed in library (isolated temp root via .isolatedGlossaryRoot), gone from project.
+        let lib = try GlossaryStore.read(scope: .library, projectURL: dir)
+        #expect(lib.terms.contains { $0.canonical == canonical })
+        let project = try GlossaryStore.read(scope: .project, projectURL: dir)
+        #expect(!project.terms.contains { $0.canonical == canonical })
     }
 }

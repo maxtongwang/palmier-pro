@@ -145,7 +145,7 @@ private struct FixedWordSource: CaptionWordSource {
 // MARK: - Tool wiring (editor + injected completer)
 
 @MainActor
-@Suite struct CaptionLintToolTests {
+@Suite(.isolatedGlossaryRoot) struct CaptionLintToolTests {
     private func spec(_ text: String, start: Int, duration: Int, group: String) -> EditorViewModel.TextClipSpec {
         var s = EditorViewModel.TextClipSpec(
             trackIndex: 0, startFrame: start, durationFrames: duration,
@@ -199,20 +199,13 @@ private struct FixedWordSource: CaptionWordSource {
         [{"clipId":"\(target)","original":"开视频","suggestion":"拍视频","reason":"near-sound","confidence":0.8}]
         """)
         // A cached transcript stand-in so the post-promotion resync rebuilds the corrected caption
-        // rather than clearing it (the auto-applied edit now promotes into the glossary).
+        // rather than clearing it (the auto-applied edit now promotes into the glossary — which the
+        // suite's .isolatedGlossaryRoot trait keeps off the real user library).
         e.captionWordSourceProvider = { _ in
             FixedWordSource(words: [WordTiming(text: "好久没有拍视频了", startFrame: 100, endFrame: 150)])
         }
         let exec = ToolExecutor(editor: e)
-        // auto-apply feeds update_text → glossary auto-promotion, which now writes the library scope;
-        // isolate that write to a temp root so it never touches the real user glossary.
-        let sharedRoot = FileManager.default.temporaryDirectory
-            .appendingPathComponent("lint-gloss-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: sharedRoot, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: sharedRoot) }
-        let result = try await GlossaryScope.$sharedRootOverride.withValue(sharedRoot) {
-            try await exec.captionLint(e, ["mode": "flags", "autoApplyThreshold": 0.7], completer: stub)
-        }
+        let result = try await exec.captionLint(e, ["mode": "flags", "autoApplyThreshold": 0.7], completer: stub)
         let out = body(result)
 
         let applied = out["applied"] as? [[String: Any]] ?? []
