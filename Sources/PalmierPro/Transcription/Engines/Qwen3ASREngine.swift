@@ -170,13 +170,20 @@ actor Qwen3ASREngine {
             ))
         }
 
+        // Roll first-after-pause word starts back to their acoustic onset so captions lead the
+        // syllable instead of inheriting a chunk-quantized start (samples are already in hand).
+        let refined = OnsetRefiner.refine(words: words, samples: samples, fps: Self.onsetFPS)
+
         return TranscriptionResult(
             text: segments.map(\.text).joined(separator: " "),
             language: "multi",
-            words: words,
+            words: refined,
             segments: segments
         )
     }
+
+    /// Reference frame rate for the onset lead-in bias; the engine is otherwise fps-agnostic.
+    private static let onsetFPS = 30
 
     private func loadedRecognizer() throws -> OpaquePointer {
         // Glossary hotwords are baked into the recognizer; rebuild when the set changes.

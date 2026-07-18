@@ -30,8 +30,8 @@ enum LocalSpeechEngine: String, CaseIterable, Identifiable, Sendable {
     var cacheTag: String? {
         switch self {
         case .apple: nil  // preserves pre-existing cache entries
-        case .qwen3: "qw5"  // v5: rescue failures logged not swallowed; aligned flag on words
-        case .whisper: "wk1"
+        case .qwen3: "qw6"  // v6: acoustic onset refinement on first-after-pause words
+        case .whisper: "wk2"  // v2: acoustic onset refinement
         }
     }
 

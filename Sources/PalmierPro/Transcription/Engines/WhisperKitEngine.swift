@@ -33,7 +33,9 @@ actor WhisperKitEngine {
         return contents.contains { $0.hasSuffix("MelSpectrogram.mlmodelc") || $0.contains(modelName) }
     }
 
-    func transcribe(fileURL: URL, language: String? = nil) async throws -> TranscriptionResult {
+    /// `refineOnsets` rolls first-after-pause word starts back to their acoustic onset; the Qwen3
+    /// engine leaves it off because it refines its own final words (this call is only its timing track).
+    func transcribe(fileURL: URL, language: String? = nil, refineOnsets: Bool = false) async throws -> TranscriptionResult {
         let pipe = try await loadedPipe()
         let options = DecodingOptions(
             task: .transcribe,
@@ -66,13 +68,19 @@ actor WhisperKitEngine {
                 }
             }
         }
+        let refined = refineOnsets
+            ? OnsetRefiner.refine(words: words, samples: (try? EngineAudio.loadSamples(fileURL: fileURL)) ?? [], fps: Self.onsetFPS)
+            : words
         return TranscriptionResult(
             text: segments.map(\.text).joined(separator: " "),
             language: detectedLanguage,
-            words: words,
+            words: refined,
             segments: segments
         )
     }
+
+    /// Reference frame rate for the onset lead-in bias; the engine is otherwise fps-agnostic.
+    private static let onsetFPS = 30
 
     /// Transcribe raw 16kHz mono samples. Forcing `language` suppresses Whisper's
     /// translate-the-minority-language behavior on code-switched audio.

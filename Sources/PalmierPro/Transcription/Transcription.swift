@@ -268,7 +268,7 @@ enum Transcription {
             // Qwen3-ASR autodetects language per chunk; no hint parameter.
             return try await Qwen3ASREngine.shared.transcribe(fileURL: fileURL)
         case .whisper:
-            return try await WhisperKitEngine.shared.transcribe(fileURL: fileURL, language: languageCode)
+            return try await WhisperKitEngine.shared.transcribe(fileURL: fileURL, language: languageCode, refineOnsets: true)
         case .apple:
             throw TranscriptionError.analysisFailed("apple engine is not routed here")
         }
