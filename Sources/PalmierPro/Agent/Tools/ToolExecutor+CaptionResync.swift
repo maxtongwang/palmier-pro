@@ -12,7 +12,8 @@ extension ToolExecutor {
 
         let dryRun = args["dryRun"] as? Bool ?? false
         let policyOverride = try parseConflictPolicy(args.string("onManualEdits"))
-        let segmentation = try parseSegmentation(args.string("segmentation"), path: "resync_captions")
+        let profileSegmentation = CaptionStyleStore.resolve(projectPackageURL: editor.projectURL).profile.typography.segmentation
+        let segmentation = try parseSegmentation(args.string("segmentation"), profileDefault: profileSegmentation, path: "resync_captions")
 
         // Resolve the spans to rebuild: an explicit group, an explicit range, their intersection,
         // or — when neither is given — every caption group in the project.

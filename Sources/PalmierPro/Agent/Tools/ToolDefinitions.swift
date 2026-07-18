@@ -51,6 +51,7 @@ enum ToolName: String, CaseIterable, Sendable {
     case updateText = "update_text"
     case addCaptions = "add_captions"
     case captionStyle = "caption_style"
+    case setCaptionStyle = "set_caption_style"
     case captionLint = "caption_lint"
     case resyncCaptions = "resync_captions"
 
@@ -859,14 +860,59 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .captionStyle,
-            description: "Returns the resolved caption-style profile for the active project — the measured filler policy and typography defaults, merged from global → library → project layers (later wins). Read this before captioning to honor project-specific policy. fillers.removeAlways is safe to strip; neverRemove must be kept; caseByCase must NEVER be auto-removed — surface those tokens and decide per occurrence with update_text/remove_words. neverDedupe marks CJK reduplication (存存钱) and comic repetition (太酷了×3) as grammar/intent, not stutters — never dedupe them. protectedPhrases are never touched by any pass. `layers` shows each source file and whether it loaded, was missing, or was malformed; `provenance` records how the policy was measured. Read-only; takes no arguments.",
+            description: "Returns the resolved caption-style profile for the active project — the measured filler policy and typography defaults, merged from global → library → project layers (later wins). Read this before captioning to honor project-specific policy. fillers.removeAlways is safe to strip; neverRemove must be kept; caseByCase must NEVER be auto-removed — surface those tokens and decide per occurrence with update_text/remove_words. neverDedupe marks CJK reduplication (存存钱) and comic repetition (太酷了×3) as grammar/intent, not stutters — never dedupe them. protectedPhrases are never touched by any pass. lintDismissals are surface forms the user confirmed correct via caption_lint dismiss — never re-flagged. `layers` shows each source file and whether it loaded, was missing, or was malformed; `provenance` records how the policy was measured. Read-only; takes no arguments.",
             inputSchema: objectSchema()
         ),
         AgentTool(
-            name: .captionLint,
-            description: "Proofreads existing caption text for suspected speech-recognition WORD-SUBSTITUTION errors — near-sound mishearings (开视频 vs 拍视频), wrong homophones/characters, or words that don't fit the surrounding lines. This is the stage no other pass owns: caption_style handles fillers, the glossary handles known proper nouns, and this catches the general ASR slips between them. It FLAGS for review — nothing is changed unless you pass autoApplyThreshold. Before candidacy, tokens owned by other stages are masked out: glossary variants/canonicals (any confidence) and caption-style filler lists (removeAlways/caseByCase/neverRemove/protectedPhrases) are never re-flagged. Word substitutions only — never rephrasing, grammar, or punctuation.\n\nmode:'flags' (default, when the app LLM is reachable) runs the caption windows through the app's model with each line's neighbours as context and returns candidates [{clipId, frameRange, original, suggestion, reason, confidence}] — nothing is applied. If the app LLM is unreachable (not signed in and no API key) it degrades to context with a note rather than failing.\n\nmode:'context' makes NO model call and returns the same windows prepared for YOU to judge — per segment {clipId, frameRange, text, prevText, nextText, exclusions:[masked terms]}. Use this to lint captions yourself without spending the app's credits, then fix with update_text(origin:'user').\n\nautoApplyThreshold (optional 0–1): only meaningful in flags mode. Candidates at or above it are applied via update_text(origin:'user') — which feeds the glossary auto-promotion classifier so a repeated domain term becomes a glossary entry automatically — and reported under `applied`; the rest stay under `flags`. Omit it to stay flag-only. Response: {flags, applied, skippedExclusions, lintSource, note?}. Windows are paged (200 per call); when more remain the response carries nextClipId — continue by passing it as afterClipId.",
+            name: .setCaptionStyle,
+            description: "Writes a caption-style profile into ONE layer's file so a policy you measured on this project persists and is reused later — this is how you capture reusable caption policy (the write counterpart to caption_style's read). Provide only the keys you want to set: each provided key REPLACES that layer's value, absent keys are left untouched (including any keys a human hand-edited), and the global → library → project layering still merges at read time. Default scope is library, which crosses projects; use project for project-only policy or global for the machine-wide baseline. Fields mirror the caption_style read shape: fillers {removeAlways, neverRemove, caseByCase, neverDedupe:{cjkReduplication, comicRepetition}} (lists of strings), protectedPhrases [string], typography {fontName, fontSize 12–300, color hex, outline, shadow, position:{x,y in 0–1}, maxWords 1–100, segmentation}, and provenance {string:string} recording how the policy was measured. typography.segmentation ('natural' | 'fixedChars') becomes the default line-breaking for add_captions / resync_captions when they are called without an explicit segmentation param (an explicit param always wins). Unknown fields, non-string list elements, and out-of-range typography values are rejected with an actionable error. Returns {scope, path, wrote, layer, resolved}.",
             inputSchema: objectSchema(
                 properties: [
+                    "scope": ["type": "string", "enum": ["global", "library", "project"], "description": "Which layer file to write. Default library (crosses projects). project writes the open project's sidecar; global writes the machine-wide baseline."],
+                    "typography": [
+                        "type": "object",
+                        "description": "Caption typography defaults. Only the keys you pass are set.",
+                        "properties": [
+                            "fontName": ["type": "string"],
+                            "fontSize": ["type": "number", "minimum": 12, "maximum": 300],
+                            "color": ["type": "string", "description": "Hex, e.g. #FFCC00."],
+                            "outline": ["type": "boolean"],
+                            "shadow": ["type": "boolean"],
+                            "position": [
+                                "type": "object",
+                                "description": "Normalized caption box center.",
+                                "properties": ["x": ["type": "number", "minimum": 0, "maximum": 1], "y": ["type": "number", "minimum": 0, "maximum": 1]],
+                            ],
+                            "maxWords": ["type": "integer", "minimum": 1, "maximum": 100],
+                            "segmentation": ["type": "string", "enum": CaptionBuilder.Segmentation.allCases.map(\.rawValue), "description": "Default line-breaking for add_captions / resync_captions when no explicit segmentation is passed."],
+                        ],
+                    ],
+                    "fillers": [
+                        "type": "object",
+                        "description": "Measured filler policy. Each list replaces that layer's list wholesale.",
+                        "properties": [
+                            "removeAlways": ["type": "array", "items": ["type": "string"], "description": "Safe to strip mechanically."],
+                            "neverRemove": ["type": "array", "items": ["type": "string"], "description": "Never strip even though generic rules would."],
+                            "caseByCase": ["type": "array", "items": ["type": "string"], "description": "Never auto-remove — surface for judgement."],
+                            "neverDedupe": [
+                                "type": "object",
+                                "properties": ["cjkReduplication": ["type": "boolean"], "comicRepetition": ["type": "boolean"]],
+                            ],
+                        ],
+                    ],
+                    "protectedPhrases": ["type": "array", "items": ["type": "string"], "description": "Phrases no filler or dedup pass may touch. Replaces the layer's list."],
+                    "provenance": ["type": "object", "description": "How the policy was measured, e.g. {\"caseByCase\":\"42-min zh/en vlog, 1120 captions\"}. String values only."],
+                ]
+            )
+        ),
+        AgentTool(
+            name: .captionLint,
+            description: "Proofreads existing caption text for suspected speech-recognition WORD-SUBSTITUTION errors — near-sound mishearings (开视频 vs 拍视频), wrong homophones/characters, or words that don't fit the surrounding lines. This is the stage no other pass owns: caption_style handles fillers, the glossary handles known proper nouns, and this catches the general ASR slips between them. It FLAGS for review — nothing is changed unless you pass autoApplyThreshold. Before candidacy, tokens owned by other stages are masked out: glossary variants/canonicals (any confidence) and caption-style filler lists (removeAlways/caseByCase/neverRemove/protectedPhrases) are never re-flagged. Word substitutions only — never rephrasing, grammar, or punctuation.\n\nmode:'flags' (default, when the app LLM is reachable) runs the caption windows through the app's model with each line's neighbours as context and returns candidates [{clipId, frameRange, original, suggestion, reason, confidence}] — nothing is applied. If the app LLM is unreachable (not signed in and no API key) it degrades to context with a note rather than failing.\n\nmode:'context' makes NO model call and returns the same windows prepared for YOU to judge — per segment {clipId, frameRange, text, prevText, nextText, exclusions:[masked terms]}. Use this to lint captions yourself without spending the app's credits, then fix with update_text(origin:'user').\n\nautoApplyThreshold (optional 0–1): only meaningful in flags mode. Candidates at or above it are applied via update_text(origin:'user') — which feeds the glossary auto-promotion classifier so a repeated domain term becomes a glossary entry automatically — and reported under `applied`; the rest stay under `flags`. Omit it to stay flag-only. Response: {flags, applied, skippedExclusions, dismissedCount?, lintSource, note?}. Windows are paged (200 per call); when more remain the response carries nextClipId — continue by passing it as afterClipId.\n\naction:'dismiss' RECORDS that a flagged surface form is actually CORRECT so lint stops re-surfacing it every run. Pass the confirmed-correct text as `original` (optionally `reason`); it is appended to the caption-style profile's lintDismissals at LIBRARY scope, so the judgement persists and crosses projects. Dismissed terms are then masked exactly like protectedPhrases (only suppressing a candidate when the CHANGED tokens hit them). A very short surface form returns a non-blocking warning because it suppresses broadly. Read current dismissals via caption_style.",
+            inputSchema: objectSchema(
+                properties: [
+                    "action": ["type": "string", "enum": ["dismiss"], "description": "Optional. 'dismiss' records `original` as confirmed-correct so lint never re-flags it (persisted to caption-style lintDismissals at library scope). Omit for a normal lint pass."],
+                    "original": ["type": "string", "description": "Required with action:'dismiss'. The caption surface form that is actually correct and should never be flagged again."],
+                    "reason": ["type": "string", "description": "Optional note stored alongside a dismiss, for your own audit trail."],
                     "clipId": ["type": "string", "description": "Optional. Lint only this caption text clip (from get_timeline captionDetail rows)."],
                     "startFrame": ["type": "integer", "description": "Optional. Only lint caption clips intersecting [startFrame, endFrame)."],
                     "endFrame": ["type": "integer", "description": "Optional. Window end (exclusive)."],

@@ -64,6 +64,73 @@ enum CaptionStyleStore {
         return Resolved(profile: accumulated.resolved(), origins: origins, warnings: warnings)
     }
 
+    // MARK: - Single-layer write (set_caption_style / lint dismiss)
+
+    enum WriteError: LocalizedError {
+        case unwritableScope(Scope)
+        case ioFailure(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .unwritableScope(.builtIn): "The built-in default layer cannot be written."
+            case .unwritableScope(.project): "No project is open, so the project caption-style layer cannot be written."
+            case .unwritableScope(let s): "The \(s.rawValue) caption-style layer cannot be written."
+            case .ioFailure(let reason): "Could not write the caption-style profile: \(reason)."
+            }
+        }
+    }
+
+    /// Writable file URL for a scope; nil for builtIn, or project scope with no open package.
+    static func url(for scope: Scope, projectPackageURL: URL?) -> URL? {
+        switch scope {
+        case .builtIn: nil
+        case .global: globalURL
+        case .library: libraryURL
+        case .project: projectURL(package: projectPackageURL)
+        }
+    }
+
+    /// One scope's raw JSON object as stored on disk — empty when missing or malformed. Never throws;
+    /// this is the read half of a read-modify-write that must tolerate concurrent hand edits.
+    static func readLayer(at url: URL) -> [String: Any] {
+        guard FileManager.default.fileExists(atPath: url.path),
+              let data = try? Data(contentsOf: url),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [:] }
+        return obj
+    }
+
+    /// Merge `provided` (a validated JSON fragment in caption_style file shape) onto the single layer
+    /// file at `url` and write it back. Provided keys replace that layer's values; absent keys are left
+    /// untouched, including unknown keys a human hand-edited in. Nested objects merge per key; arrays
+    /// and scalars replace wholesale. Read-modify-write, so concurrent hand edits to other keys survive.
+    @discardableResult
+    static func writeLayer(_ provided: [String: Any], at url: URL) throws -> [String: Any] {
+        let merged = deepMerge(base: readLayer(at: url), over: provided)
+        do {
+            try FileManager.default.createDirectory(
+                at: url.deletingLastPathComponent(), withIntermediateDirectories: true
+            )
+            let data = try JSONSerialization.data(withJSONObject: merged, options: [.prettyPrinted, .sortedKeys])
+            try data.write(to: url, options: .atomic)
+        } catch {
+            throw WriteError.ioFailure(error.localizedDescription)
+        }
+        return merged
+    }
+
+    /// Recursive object merge: same-key objects merge; arrays and scalars from `over` replace `base`.
+    static func deepMerge(base: [String: Any], over: [String: Any]) -> [String: Any] {
+        var result = base
+        for (key, value) in over {
+            if let nestedOver = value as? [String: Any], let nestedBase = result[key] as? [String: Any] {
+                result[key] = deepMerge(base: nestedBase, over: nestedOver)
+            } else {
+                result[key] = value
+            }
+        }
+        return result
+    }
+
     private enum LoadResult {
         case loaded(CaptionStyleProfilePartial)
         case missing

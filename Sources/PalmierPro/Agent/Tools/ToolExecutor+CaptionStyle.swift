@@ -24,9 +24,11 @@ extension ToolExecutor {
         if let v = profile.typography.shadow { typography["shadow"] = v }
         if let v = profile.typography.position { typography["position"] = ["x": v.x, "y": v.y] }
         if let v = profile.typography.maxWords { typography["maxWords"] = v }
+        if let v = profile.typography.segmentation { typography["segmentation"] = v }
 
         var payload: [String: Any] = [
             "version": profile.version,
+            "lintDismissals": profile.lintDismissals,
             "fillers": [
                 "removeAlways": profile.fillers.removeAlways,
                 "neverRemove": profile.fillers.neverRemove,
@@ -48,6 +50,7 @@ extension ToolExecutor {
                 "caseByCase": "NEVER auto-remove — stop and surface for judgement; decide per occurrence via update_text/remove_words.",
                 "neverDedupe": "Repeated CJK tokens and deliberate comic repetition are not stutters — never dedupe them.",
                 "protectedPhrases": "Never touched by any filler or dedup pass.",
+                "lintDismissals": "Surface forms the user confirmed correct via caption_lint dismiss — caption_lint never re-flags them.",
             ],
         ]
         if !resolved.warnings.isEmpty { payload["warnings"] = resolved.warnings }
