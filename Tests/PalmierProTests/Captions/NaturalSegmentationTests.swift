@@ -54,6 +54,24 @@ struct NaturalSegmentationTests {
         #expect(phrases[0].words.map(\.text) == ["好", "久", "没", "有", "开", "视", "频", "了"])
     }
 
+    @Test func tightCapSplitsAtTokenSeamsNotMidToken() {
+        // Accepted limitation: under a tight cap a proper noun may split at the 重庆|西站 token seam
+        // (NLTokenizer sees two words) — but never mid-character, and each token stays whole.
+        let source = "那我现在人在重庆西站在等着"
+        let phrases = CaptionBuilder.phrases(
+            fromTimedWords: cjkWords(source),
+            fits: { _ in true },
+            maxWords: 4,
+            minDuration: 0
+        )
+        let lines = phrases.map(\.text)
+        #expect(lines.count > 1)   // a tight cap forces multiple lines
+        #expect(lines.allSatisfy { GlossaryText.cjkCount($0) <= 4 })
+        assertTokensWhole(lines, source: source)
+        #expect(lines.contains { $0.contains("重庆") })
+        #expect(lines.contains { $0.contains("西站") })
+    }
+
     @Test func punctuationBindsLeftNeverStartsALine() {
         let source = "好久没有开视频了。那我现在人在重庆西站在等着"
         let phrases = CaptionBuilder.phrases(

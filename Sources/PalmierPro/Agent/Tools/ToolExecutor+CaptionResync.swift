@@ -90,7 +90,11 @@ extension CaptionResyncReport {
             }
         }
         if !conflicts.isEmpty {
-            out["conflicts"] = conflicts.map { ["clipId": $0.clipId, "manualText": $0.manualText, "newTranscript": $0.newTranscript] }
+            out["conflicts"] = conflicts.map { c -> [String: Any] in
+                var row: [String: Any] = ["clipId": c.clipId, "manualText": c.manualText, "newTranscript": c.newTranscript]
+                if !c.reason.isEmpty { row["reason"] = c.reason }
+                return row
+            }
         }
         if !skippedRefs.isEmpty { out["skippedNoTranscript"] = skippedRefs }
         return out

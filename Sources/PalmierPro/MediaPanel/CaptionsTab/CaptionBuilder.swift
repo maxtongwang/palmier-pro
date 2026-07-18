@@ -84,14 +84,12 @@ enum CaptionBuilder {
 
     // MARK: - Natural segmentation
 
-    /// Sentence and clause marks that end a caption line. They bind to the preceding line and never
-    /// begin the next one. ASCII marks additionally require a following space (see `isHardBreak`).
+    /// Sentence/clause marks that end a caption line, bound to the preceding line, never starting the next.
     private static let hardBreakPunct: Set<Character> = ["。", "？", "！", "，", "、", "；", "…", ".", "?", "!", ","]
     private static let asciiHardBreak: Set<Character> = [".", "?", "!", ","]
 
-    /// Break `text` into the shortest natural caption lines. Hard breaks bind trailing punctuation to the
-    /// line before them; an over-long run splits only at word-token boundaries (never inside a CJK or
-    /// Latin token); shorter lines win ties. Text content is preserved — only boundaries are chosen.
+    /// Cut into shortest natural lines: hard breaks then word-token boundaries; content preserved.
+    /// No NER — under a tight cap a run splits at the NLTokenizer seam (重庆|西站), only mid-token is prevented.
     private static func naturalLines(_ text: String, fits: (String) -> Bool, maxWords: Int?) -> [String] {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return [] }
@@ -147,8 +145,7 @@ enum CaptionBuilder {
         return n.isWhitespace
     }
 
-    /// True when adding this line would exceed the caption cap. For CJK-bearing lines the cap counts
-    /// characters (what callers mean for CJK); Latin lines keep the word-count meaning.
+    /// Cap counts characters for CJK-bearing lines, words for Latin — what callers mean by maxWords.
     private static func exceedsCap(_ line: String, _ maxWords: Int?) -> Bool {
         guard let cap = maxWords else { return false }
         if line.contains(where: GlossaryText.isCJK) {
@@ -168,8 +165,7 @@ enum CaptionBuilder {
         return map
     }
 
-    /// Join transcript tokens into a clean line: no space inside a CJK run, no space before punctuation,
-    /// a single space between Latin runs and across a CJK↔Latin seam.
+    /// Join tokens cleanly: no space inside a CJK run or before punctuation, one space at Latin/seam gaps.
     private static func cjkAwareJoin(_ tokens: [String]) -> String {
         var out = ""
         for token in tokens where !token.isEmpty {

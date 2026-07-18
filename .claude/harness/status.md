@@ -1,43 +1,41 @@
-# feature/glossary — Status
+# fix/caption-segmentation — Status
 
 Phase 2 complete. Ready for Evaluator.
 
-## Feature
+## Scope
 
-L1 transcript correction layer ("glossary"). Additive corrections applied at READ time; raw
-cached ASR JSON on disk is never mutated.
+Two production caption bugs from a 42-min code-switched zh/en vlog (1120 auto captions,
+re-broken into shortest natural semantic units).
 
-## Delivered
+## BUG-1 — add_texts orphaned from caption group
 
-| Area            | Files                                                                                            |
-| --------------- | ------------------------------------------------------------------------------------------------ |
-| Model           | Glossary/GlossaryTerm.swift (term, document, confidence, type)                                   |
-| Text primitives | Glossary/GlossaryText.swift (CJK detection, Latin boundaries)                                    |
-| Corrector       | Glossary/GlossaryCorrector.swift (longest-match-first, word-span)                                |
-| Materialisation | Glossary/TranscriptionResult+Glossary.swift                                                      |
-| Store/layering  | Glossary/GlossaryStore.swift (global→library→project, hotwords, fingerprint)                     |
-| Validation      | Glossary/GlossaryValidation.swift (variant safety §5.4)                                          |
-| Classifier      | Glossary/GlossaryClassifier.swift + GlossaryCommonWords.swift                                    |
-| MCP tools       | Agent/Tools/ToolExecutor+Glossary.swift (list/add/remove/apply)                                  |
-| Registration    | ToolDefinitions.swift (ToolName + defs), ToolExecutor.swift (dispatch)                           |
-| Read hooks      | get_transcript, inspect_media (video+audio), add_captions, spoken search                         |
-| Cache salting   | TranscriptCache.swift cacheTag param                                                             |
-| Promotion       | ToolExecutor+Texts.swift update_text hook + origin param                                         |
-| Tests           | Tests/PalmierProTests/Glossary/{GlossaryTests,GlossarySearchTests,GlossaryClassifierTests}.swift |
+| Area           | Change                                                                                       |
+| -------------- | -------------------------------------------------------------------------------------------- |
+| Inheritance    | ToolExecutor+Texts.swift `addTexts` — new clips default-join a track's uniform caption group |
+| Explicit param | add_texts `captionGroupId` (validated); "none" opts out; explicit overrides inheritance      |
+| Engine default | CaptionResyncEngine.swift — nil generatedText is now dirty (preserve+conflict), not replace  |
+| Schema         | ToolDefinitions.swift add_texts entry gains captionGroupId                                   |
+
+## BUG-2 — fixed ~5-CJK-char guillotine
+
+| Area         | Change                                                                                               |
+| ------------ | ---------------------------------------------------------------------------------------------------- |
+| Segmentation | CaptionBuilder.swift natural mode: hard breaks at 。？！，、；… . ? ! , then NLTokenizer word splits |
+| CJK safety   | Never splits a CJK/Latin token; punctuation binds left; maxWords = chars (CJK) / words (Latin)       |
+| Plumbing     | segmentation param on add_captions + resync_captions → CaptionRequest + resync chunker               |
+| Default      | natural everywhere incl reactive auto-resync; fixedChars = legacy                                    |
+| Timing       | naturally segmented phrases still slice per-word timings (karaoke preserved)                         |
 
 ## Verification
 
 - `swift build` — clean.
-- `swift test --filter Glossary` — 32/32 pass.
-- `swift test` (full) — 1096/1096 pass.
+- `swift test` (full) — 1158/1158 pass.
+- New suites: NaturalSegmentation (7), AddTexts caption grouping (8); existing CaptionBuilder
+  tests pinned to `.fixedChars` as the legacy regression pin.
 
-## Integration notes for merge
+## Integration notes
 
-- Library scope maps to `Project.storageDirectory` (no cross-project media-library root exists).
-- update_text conflict surface: added `origin` param + promotion block before the final
-  `mutationResult` return. `promoted` rides in `extra`.
-- `generatedText` (from another branch) not present on Clip yet — marked with an INTEGRATION TODO
-  in update_text; branch compiles standalone on origin/main.
-- Decoder-bias wiring intentionally NOT connected (engine on another branch). Public API ready:
-  `GlossaryStore.hotwordTerms()`, `GlossaryStore.biasFingerprint()`, and
-  `TranscriptCache.transcript(..., cacheTag:)`.
+- Touched ToolExecutor+Texts (add_texts) and CaptionBuilder — edits kept additive/localized to
+  minimize merge with sibling fix/caption-timing (update_text + CaptionBuilder timing threading).
+- `parseSegmentation` lives in ToolExecutor+Captions.swift, shared by add_captions and resync_captions.
+- Worktree Vendor/sherpa-onnx.xcframework symlinked from the main checkout (git-ignored binary).
