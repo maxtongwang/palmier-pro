@@ -490,8 +490,9 @@ extension ToolExecutor {
             throw ToolError("Mixed trackIndex: \(omittedCount) of \(partials.count) entries omitted trackIndex. Either set it on every entry or omit it on every entry (to auto-create a shared new track).")
         }
 
-        // onOverlap:'fail' validates every entry's span against existing clips BEFORE mutating, so an
-        // accidental overwrite never silently deletes clips. A fresh omitted track can't collide.
+        // onOverlap:'fail' validates BEFORE mutating so the safety valve never leaves a worse state than
+        // clear mode. Two checks: entries vs existing clips, and entries vs each other (fail mode places
+        // with clearExistingRegions off, so mutually overlapping entries would both land on one track).
         if onOverlap == .fail {
             var collisions: [String] = []
             for p in partials {
@@ -504,6 +505,20 @@ extension ToolExecutor {
             if !collisions.isEmpty {
                 let unique = Array(Set(collisions)).sorted()
                 throw ToolError("add_texts onOverlap:'fail' — \(unique.count) existing clip(s) intersect the requested spans: \(unique.joined(separator: ", ")). No clips were added.")
+            }
+
+            // Entries sharing a resolved target track (omitted trackIndex → one shared new track) must not
+            // overlap one another. Index by entry position so the error names the offending entries.
+            let byTarget = Dictionary(grouping: partials.indices) { partials[$0].trackId ?? "new" }
+            for idxs in byTarget.values where idxs.count > 1 {
+                let ordered = idxs.sorted { partials[$0].startFrame < partials[$1].startFrame }
+                for i in 1..<ordered.count {
+                    let prev = partials[ordered[i - 1]]
+                    let cur = partials[ordered[i]]
+                    if prev.startFrame + prev.durationFrames > cur.startFrame {
+                        throw ToolError("add_texts onOverlap:'fail' — entries \(ordered[i - 1]) and \(ordered[i]) have overlapping spans on the same target track. No clips were added.")
+                    }
+                }
             }
         }
 

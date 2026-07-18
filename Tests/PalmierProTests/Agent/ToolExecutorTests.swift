@@ -2420,6 +2420,52 @@ struct SetClipPropertiesTests {
         #expect(clips[1].startFrame == 30)
     }
 
+    @Test func addTextsFailOnOverlapRejectsMutuallyOverlappingEntries() async {
+        // Two entries in one call whose spans overlap each other must fail before mutating — the safety
+        // valve must never leave overlapping clips (worse than clear mode).
+        let h = ToolHarness(timeline: Fixtures.timeline(tracks: [Fixtures.videoTrack(clips: [])]))
+        let result = await h.runRaw("add_texts", args: [
+            "onOverlap": "fail",
+            "entries": [
+                ["trackIndex": 0, "startFrame": 0, "endFrame": 60, "content": "A"],
+                ["trackIndex": 0, "startFrame": 30, "endFrame": 90, "content": "B"],
+            ],
+        ])
+        #expect(result.isError)
+        #expect(ToolHarness.textOf(result).contains("overlapping"))
+        #expect(h.editor.timeline.tracks[0].clips.isEmpty)
+    }
+
+    @Test func addTextsFailOnOverlapRejectsOverlapOnNewSharedTrack() async {
+        // Omitted trackIndex routes every entry onto one new track; overlapping entries there must fail too.
+        let h = ToolHarness()
+        let initialTrackCount = h.editor.timeline.tracks.count
+        let result = await h.runRaw("add_texts", args: [
+            "onOverlap": "fail",
+            "entries": [
+                ["startFrame": 0, "endFrame": 60, "content": "A"],
+                ["startFrame": 30, "endFrame": 90, "content": "B"],
+            ],
+        ])
+        #expect(result.isError)
+        // No track was created and nothing was placed.
+        #expect(h.editor.timeline.tracks.count == initialTrackCount)
+    }
+
+    @Test func addTextsFailOnOverlapPlacesDisjointEntries() async {
+        let h = ToolHarness(timeline: Fixtures.timeline(tracks: [Fixtures.videoTrack(clips: [])]))
+        let result = await h.runRaw("add_texts", args: [
+            "onOverlap": "fail",
+            "entries": [
+                ["trackIndex": 0, "startFrame": 0, "endFrame": 30, "content": "A"],
+                ["trackIndex": 0, "startFrame": 30, "endFrame": 60, "content": "B"],  // abuts, does not overlap
+            ],
+        ])
+        #expect(result.isError == false, "\(ToolHarness.textOf(result))")
+        let contents = Set(h.editor.timeline.tracks[0].clips.compactMap(\.textContent))
+        #expect(contents == ["A", "B"])
+    }
+
     @Test func addTextsFailOnOverlapValidatesPerTrackAtomically() async {
         let existing = textClip("cap1", start: 0, duration: 60, content: "Existing")
         let h = ToolHarness(timeline: Fixtures.timeline(tracks: [
