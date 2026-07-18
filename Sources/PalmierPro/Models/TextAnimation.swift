@@ -20,6 +20,11 @@ struct TextAnimation: Codable, Sendable, Equatable {
     var preset: Preset = .none
     var perWordFrames: Int = 6
     var highlight: TextStyle.RGBA?
+    /// Animation unit for per-word/typewriter presets. `word` (default) animates a whole word — a CJK
+    /// word like 重庆 as one unit; `char` animates each character. Missing in old projects → word.
+    var granularity: Granularity = .word
+
+    enum Granularity: String, Codable, Sendable { case word, char }
 
     enum Preset: String, Codable, CaseIterable, Sendable {
         case none
@@ -69,12 +74,13 @@ struct TextAnimation: Codable, Sendable, Equatable {
 
     static let defaultHighlight = TextStyle.RGBA(r: 1, g: 0.85, b: 0, a: 1)
 
-    private enum CodingKeys: String, CodingKey { case preset, perWordFrames, highlight }
+    private enum CodingKeys: String, CodingKey { case preset, perWordFrames, highlight, granularity }
 
-    init(preset: Preset = .none, perWordFrames: Int = 6, highlight: TextStyle.RGBA? = nil) {
+    init(preset: Preset = .none, perWordFrames: Int = 6, highlight: TextStyle.RGBA? = nil, granularity: Granularity = .word) {
         self.preset = preset
         self.perWordFrames = perWordFrames
         self.highlight = highlight
+        self.granularity = granularity
     }
 
     init(from decoder: Decoder) throws {
@@ -82,7 +88,8 @@ struct TextAnimation: Codable, Sendable, Equatable {
         self.init(
             preset: (try? c.decode(Preset.self, forKey: .preset)) ?? .none,
             perWordFrames: (try? c.decode(Int.self, forKey: .perWordFrames)) ?? 6,
-            highlight: try? c.decode(TextStyle.RGBA.self, forKey: .highlight)
+            highlight: try? c.decode(TextStyle.RGBA.self, forKey: .highlight),
+            granularity: (try? c.decode(Granularity.self, forKey: .granularity)) ?? .word
         )
     }
 }

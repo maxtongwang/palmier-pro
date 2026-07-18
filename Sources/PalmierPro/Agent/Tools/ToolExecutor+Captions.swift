@@ -3,7 +3,7 @@ import Foundation
 
 extension ToolExecutor {
     private static let addCaptionsAllowedKeys: Set<String> = Set([
-        "style", "transform", "censorProfanity", "language", "animation", "highlightColor", "maxWords", "fillerPolicy", "segmentation",
+        "style", "transform", "censorProfanity", "language", "animation", "highlightColor", "granularity", "maxWords", "fillerPolicy", "segmentation",
     ])
 
     /// Parse the shared `segmentation` param (add_captions / resync_captions). Defaults to natural.
@@ -38,7 +38,7 @@ extension ToolExecutor {
             center = CGPoint(x: position.x, y: position.y)
         }
 
-        let animation = try parseTextAnimation(preset: args.string("animation"), highlightColor: args.string("highlightColor"), path: "add_captions") ?? TextAnimation()
+        let animation = try parseTextAnimation(preset: args.string("animation"), highlightColor: args.string("highlightColor"), granularity: args.string("granularity"), path: "add_captions") ?? TextAnimation()
 
         var maxWords: Int?
         if let n = args.int("maxWords") {

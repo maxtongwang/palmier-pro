@@ -1,6 +1,7 @@
 import AppKit
 import CoreImage
 import CoreText
+import NaturalLanguage
 
 /// Renders a text clip as a CIImage using CoreText on the compositor queue
 enum TextFrameRenderer {
@@ -176,7 +177,7 @@ enum TextFrameRenderer {
         var origins = [CGPoint](repeating: .zero, count: lines.count)
         CTFrameGetLineOrigins(ctFrame, CFRange(location: 0, length: 0), &origins)
 
-        let tokens = words(in: content)
+        let tokens = animationUnits(in: content, granularity: anim.granularity)
         let timings = tokenTimings(tokens, clip.wordTimings, duration: clip.durationFrames)
         let rel = frame - clip.startFrame
         let baseAttrs = style.attributes(size: fontSize)
@@ -244,7 +245,7 @@ enum TextFrameRenderer {
         let rel = frame - clip.startFrame
         let ns = content as NSString
 
-        let tokens = words(in: content)
+        let tokens = animationUnits(in: content, granularity: clip.textAnimation?.granularity ?? .word)
         let timings = tokenTimings(tokens, clip.wordTimings, duration: clip.durationFrames)
         var visLen = 0
         for (i, tok) in tokens.enumerated() {
@@ -429,10 +430,19 @@ enum TextFrameRenderer {
         return out
     }
 
-    /// Word tokens for per-word animation: whitespace-separated runs, with each CJK character its
-    /// own token so per-character word timings drive per-character karaoke (a space-less CJK line
-    /// would otherwise collapse to a single span). Mirrors CaptionText.tokens on UTF-16 ranges.
-    private static func words(in content: String) -> [(range: NSRange, text: String)] {
+    /// Animation units for per-word/typewriter presets. `word` (default) groups a CJK run into
+    /// NLTokenizer words (重庆 as one unit) while Latin stays whitespace-run; `char` splits every CJK
+    /// character out so per-character timings drive per-character karaoke.
+    static func animationUnits(in content: String, granularity: TextAnimation.Granularity) -> [(range: NSRange, text: String)] {
+        switch granularity {
+        case .char: return charUnits(in: content)
+        case .word: return wordUnits(in: content)
+        }
+    }
+
+    /// Whitespace-separated runs, each CJK character its own token. Mirrors CaptionText.tokens on
+    /// UTF-16 ranges — the space-less CJK line would otherwise collapse to a single span.
+    private static func charUnits(in content: String) -> [(range: NSRange, text: String)] {
         let ns = content as NSString
         let ws = CharacterSet.whitespacesAndNewlines
         // A surrogate half (emoji etc.) maps to no scalar — treat it as part of a word, not whitespace.
@@ -462,6 +472,44 @@ enum TextFrameRenderer {
         }
         flushRun(ns.length)
         return result
+    }
+
+    /// Whitespace-separated runs; a run containing CJK is sub-tokenized by NLTokenizer into words so a
+    /// CJK phrase animates word-by-word. Latin/number runs stay whole (so "U.S." is one unit as before).
+    private static func wordUnits(in content: String) -> [(range: NSRange, text: String)] {
+        let ns = content as NSString
+        let ws = CharacterSet.whitespacesAndNewlines
+        var result: [(NSRange, String)] = []
+        var runStart = -1
+        func flushRun(_ end: Int) {
+            guard runStart >= 0 else { return }
+            appendWordUnits(ns, run: NSRange(location: runStart, length: end - runStart), into: &result)
+            runStart = -1
+        }
+        for i in 0..<ns.length {
+            let isSpace = Unicode.Scalar(ns.character(at: i)).map { ws.contains($0) } ?? false
+            if isSpace { flushRun(i) } else if runStart < 0 { runStart = i }
+        }
+        flushRun(ns.length)
+        return result
+    }
+
+    private static func appendWordUnits(_ ns: NSString, run: NSRange, into result: inout [(NSRange, String)]) {
+        let text = ns.substring(with: run)
+        guard text.unicodeScalars.contains(where: CaptionText.isCJK) else {
+            result.append((run, text)); return
+        }
+        let tokenizer = NLTokenizer(unit: .word)
+        tokenizer.string = text
+        var any = false
+        tokenizer.enumerateTokens(in: text.startIndex..<text.endIndex) { range, _ in
+            let sub = NSRange(range, in: text)
+            let abs = NSRange(location: run.location + sub.location, length: sub.length)
+            result.append((abs, ns.substring(with: abs)))
+            any = true
+            return true
+        }
+        if !any { result.append((run, text)) }
     }
 
     // MARK: - Shared drawing

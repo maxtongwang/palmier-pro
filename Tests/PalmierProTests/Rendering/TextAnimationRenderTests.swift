@@ -145,6 +145,69 @@ struct TextAnimationRenderTests {
         #expect(yellow(45) == 0, "the silent gap between characters is never highlighted")
     }
 
+    // MARK: - Granularity (word default vs. per-character opt-in)
+
+    private func unitTexts(_ content: String, _ g: TextAnimation.Granularity) -> [String] {
+        TextFrameRenderer.animationUnits(in: content, granularity: g).map(\.text)
+    }
+
+    @Test func wordModeGroupsCJKIntoNLTokenizerUnits() {
+        // Default (word) groups a space-less CJK run into NLTokenizer words, not per character.
+        #expect(unitTexts("重庆视频", .word) == ["重庆", "视频"])
+    }
+
+    @Test func charModeReproducesPerCharacter() {
+        #expect(unitTexts("重庆视频", .char) == ["重", "庆", "视", "频"])
+    }
+
+    @Test func wordModeUnionsPerCharacterSpans() {
+        // Per-character transcript timings must collapse into one span per NLTokenizer word.
+        let units = TextFrameRenderer.animationUnits(in: "重庆视频", granularity: .word)
+        let perChar = [
+            WordTiming(text: "重", startFrame: 10, endFrame: 20),
+            WordTiming(text: "庆", startFrame: 20, endFrame: 35),
+            WordTiming(text: "视", startFrame: 50, endFrame: 60),
+            WordTiming(text: "频", startFrame: 60, endFrame: 80),
+        ]
+        let timings = TextFrameRenderer.tokenTimings(units, perChar, duration: 90)
+        #expect(timings == [
+            WordTiming(text: "重庆", startFrame: 10, endFrame: 35),
+            WordTiming(text: "视频", startFrame: 50, endFrame: 80),
+        ])
+    }
+
+    @Test func latinUnaffectedByWordMode() {
+        // Latin whitespace runs are identical in both modes, and punctuation-glued runs stay whole.
+        #expect(unitTexts("New York", .word) == ["New", "York"])
+        #expect(unitTexts("New York", .char) == ["New", "York"])
+        #expect(unitTexts("U.S. flag", .word) == ["U.S.", "flag"])
+    }
+
+    @Test func nilWordTimingsUniformFallbackPerWordUnit() {
+        // No transcript timings → each word unit gets an even slice of the duration (word-mode units).
+        let units = TextFrameRenderer.animationUnits(in: "重庆视频", granularity: .word)
+        let timings = TextFrameRenderer.tokenTimings(units, nil, duration: 90)
+        #expect(timings == [
+            WordTiming(text: "重庆", startFrame: 0, endFrame: 45),
+            WordTiming(text: "视频", startFrame: 45, endFrame: 90),
+        ])
+    }
+
+    @Test func granularityMissingFieldDecodesToWord() throws {
+        // Old projects (and the recent per-char default) have no granularity key → word.
+        let legacy = Data(#"{"preset":"highlightPop","perWordFrames":6}"#.utf8)
+        let decoded = try JSONDecoder().decode(TextAnimation.self, from: legacy)
+        #expect(decoded.granularity == .word)
+    }
+
+    @Test func granularityRoundTripsCodable() throws {
+        let encoder = JSONEncoder(), decoder = JSONDecoder()
+        for g in [TextAnimation.Granularity.word, .char] {
+            let a = TextAnimation(preset: .highlightPop, granularity: g)
+            #expect(try decoder.decode(TextAnimation.self, from: encoder.encode(a)).granularity == g)
+        }
+    }
+
     @Test func noWordTimingsStillAnimatesUniformly() {
         var c = Clip(mediaRef: "", startFrame: 0, durationFrames: 90)
         c.id = "uniform"

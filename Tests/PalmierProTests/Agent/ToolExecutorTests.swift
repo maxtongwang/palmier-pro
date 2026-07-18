@@ -2275,6 +2275,41 @@ struct SetClipPropertiesTests {
         #expect(animation?.highlight == highlight)
     }
 
+    @Test func updateTextAnimationSetsGranularity() async {
+        var clip = Fixtures.clip(id: "title", mediaRef: "text", mediaType: .text, start: 0, duration: 60)
+        clip.textContent = "重庆视频"
+        let h = ToolHarness(timeline: Fixtures.timeline(tracks: [Fixtures.videoTrack(clips: [clip])]))
+
+        let result = await h.runRaw("update_text", args: [
+            "clipIds": ["title"],
+            "animation": "highlightPop",
+            "granularity": "char",
+        ])
+
+        #expect(result.isError == false, "\(ToolHarness.textOf(result))")
+        #expect(h.editor.timeline.tracks[0].clips[0].textAnimation?.granularity == .char)
+    }
+
+    @Test func updateTextAnimationDefaultsGranularityToWord() async {
+        var clip = Fixtures.clip(id: "title", mediaRef: "text", mediaType: .text, start: 0, duration: 60)
+        clip.textContent = "重庆视频"
+        let h = ToolHarness(timeline: Fixtures.timeline(tracks: [Fixtures.videoTrack(clips: [clip])]))
+
+        _ = await h.runRaw("update_text", args: ["clipIds": ["title"], "animation": "highlightPop"])
+        #expect(h.editor.timeline.tracks[0].clips[0].textAnimation?.granularity == .word)
+    }
+
+    @Test func updateTextAnimationRejectsBadGranularity() async {
+        var clip = Fixtures.clip(id: "title", mediaRef: "text", mediaType: .text, start: 0, duration: 60)
+        clip.textContent = "hi"
+        let h = ToolHarness(timeline: Fixtures.timeline(tracks: [Fixtures.videoTrack(clips: [clip])]))
+
+        let result = await h.runRaw("update_text", args: [
+            "clipIds": ["title"], "animation": "wordPop", "granularity": "sentence",
+        ])
+        #expect(result.isError == true)
+    }
+
     @Test func updateTextContentRetimesSurvivingWordTimings() async {
         var clip = Fixtures.clip(id: "title", mediaRef: "text", mediaType: .text, start: 0, duration: 60)
         clip.textContent = "old text"

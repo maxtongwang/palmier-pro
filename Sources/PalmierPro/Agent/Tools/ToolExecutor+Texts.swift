@@ -107,12 +107,12 @@ fileprivate struct PartialTextSpec {
 extension ToolExecutor {
     private static let addTextsAllowedKeys: Set<String> = Set([
         "trackIndex", "startFrame", "endFrame", "content",
-        "style", "transform", "animation", "highlightColor", "captionGroupId",
+        "style", "transform", "animation", "highlightColor", "granularity", "captionGroupId",
     ])
 
     private static let updateTextAllowedKeys: Set<String> = Set([
         "clipIds", "captionGroupId", "content",
-        "style", "transform", "animation", "highlightColor", "origin",
+        "style", "transform", "animation", "highlightColor", "granularity", "origin",
     ])
 
     func parseTextStylePatch(_ args: [String: Any], path: String) throws -> ParsedTextStylePatch? {
@@ -327,14 +327,22 @@ extension ToolExecutor {
     }
 
     /// Returns a TextAnimation for an agent 'animation' spec, or nil if 'off' or not set.
-    func parseTextAnimation(preset raw: String?, highlightColor: String?, path: String) throws -> TextAnimation? {
+    func parseTextAnimation(preset raw: String?, highlightColor: String?, granularity: String? = nil, path: String) throws -> TextAnimation? {
         guard let raw, raw != "off" else { return nil }
         guard let preset = TextAnimation.Preset(rawValue: raw), preset != .none else {
             throw ToolError("\(path): animation must be one of \(TextAnimation.Preset.agentValues.joined(separator: ", "))")
         }
-        var anim = TextAnimation(preset: preset)
+        var anim = TextAnimation(preset: preset, granularity: try parseGranularity(granularity, path: path))
         if let hex = try parseColorHex(highlightColor, path: path) { anim.highlight = hex }
         return anim
+    }
+
+    private func parseGranularity(_ raw: String?, path: String) throws -> TextAnimation.Granularity {
+        guard let raw else { return .word }
+        guard let g = TextAnimation.Granularity(rawValue: raw) else {
+            throw ToolError("\(path): granularity must be one of word, char")
+        }
+        return g
     }
 
     private func parseAddTextTransform(
@@ -455,7 +463,7 @@ extension ToolExecutor {
                 content: content,
                 style: style,
                 transform: transform,
-                animation: try parseTextAnimation(preset: entry.string("animation"), highlightColor: entry.string("highlightColor"), path: path),
+                animation: try parseTextAnimation(preset: entry.string("animation"), highlightColor: entry.string("highlightColor"), granularity: entry.string("granularity"), path: path),
                 group: try parseCaptionGroupChoice(editor, entry: entry, path: path)
             ))
         }
@@ -541,7 +549,7 @@ extension ToolExecutor {
 
         let textStylePatch = try parseTextStylePatch(args, path: "update_text")
         let transform = try parseUpdateTextTransform(args["transform"] as? [String: Any], path: "update_text")
-        let animation = try parseTextAnimation(preset: args.string("animation"), highlightColor: args.string("highlightColor"), path: "update_text")
+        let animation = try parseTextAnimation(preset: args.string("animation"), highlightColor: args.string("highlightColor"), granularity: args.string("granularity"), path: "update_text")
         let shouldSetAnimation = args.string("animation") != nil
         let highlightOnly = shouldSetAnimation ? nil : try parseColorHex(args.string("highlightColor"), path: "update_text")
 
@@ -610,6 +618,7 @@ extension ToolExecutor {
                     if let animation {
                         var current = clip.textAnimation ?? TextAnimation()
                         current.preset = animation.preset
+                        current.granularity = animation.granularity
                         if let highlight = animation.highlight {
                             current.highlight = highlight
                         }
