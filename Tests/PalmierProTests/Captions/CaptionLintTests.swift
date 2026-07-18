@@ -12,6 +12,14 @@ private struct FailingCompleter: LintCompleter {
     func complete(system: String, user: String) async throws -> String { throw Boom() }
 }
 
+/// Returns fixed words for any span — stands in for a cached transcript so the post-edit caption
+/// resync rebuilds to the same text instead of clearing it (production always has a transcript).
+private struct FixedWordSource: CaptionWordSource {
+    let words: [WordTiming]
+    func audibleWords(in range: Range<Int>) -> [WordTiming] { words }
+    func uncachedRefs(in range: Range<Int>) -> [String] { [] }
+}
+
 // MARK: - Core linter (pure, no editor)
 
 @Suite struct CaptionLinterTests {
@@ -190,8 +198,21 @@ private struct FailingCompleter: LintCompleter {
         let stub = StubCompleter(response: """
         [{"clipId":"\(target)","original":"开视频","suggestion":"拍视频","reason":"near-sound","confidence":0.8}]
         """)
+        // A cached transcript stand-in so the post-promotion resync rebuilds the corrected caption
+        // rather than clearing it (the auto-applied edit now promotes into the glossary).
+        e.captionWordSourceProvider = { _ in
+            FixedWordSource(words: [WordTiming(text: "好久没有拍视频了", startFrame: 100, endFrame: 150)])
+        }
         let exec = ToolExecutor(editor: e)
-        let result = try await exec.captionLint(e, ["mode": "flags", "autoApplyThreshold": 0.7], completer: stub)
+        // auto-apply feeds update_text → glossary auto-promotion, which now writes the library scope;
+        // isolate that write to a temp root so it never touches the real user glossary.
+        let sharedRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("lint-gloss-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: sharedRoot, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: sharedRoot) }
+        let result = try await GlossaryScope.$sharedRootOverride.withValue(sharedRoot) {
+            try await exec.captionLint(e, ["mode": "flags", "autoApplyThreshold": 0.7], completer: stub)
+        }
         let out = body(result)
 
         let applied = out["applied"] as? [[String: Any]] ?? []
