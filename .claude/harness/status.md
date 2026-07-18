@@ -2,14 +2,15 @@
 
 Phase 2 complete. Ready for Evaluator.
 
-## FIX-A — animation granularity (per-char now opt-in)
+## FIX-A — animation granularity (per-char now opt-in) + off by default
 
-| Area     | Change                                                                                           |
-| -------- | ------------------------------------------------------------------------------------------------ |
-| Model    | TextAnimation.granularity (word default \| char), tolerant Codable — missing key → word          |
-| Renderer | TextFrameRenderer.animationUnits(in:granularity:): word groups CJK via NLTokenizer, char = today |
-| Timings  | Word units reuse tokenTimings alignment → union of per-char spans; nil timings → even fallback   |
-| Tools    | granularity param on update_text/add_texts/add_captions (schema + parse, default word)           |
+| Area     | Change                                                                                                                                                                                       |
+| -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Model    | TextAnimation.granularity (word default \| char), tolerant Codable — missing key → word                                                                                                      |
+| Renderer | TextFrameRenderer.animationUnits(in:granularity:): word groups CJK via NLTokenizer, char = today                                                                                             |
+| Timings  | Word units reuse tokenTimings alignment → union of per-char spans; nil timings → even fallback                                                                                               |
+| Tools    | granularity param on update_text/add_texts/add_captions (schema + parse, default word)                                                                                                       |
+| Default  | Animation OFF by default everywhere — audit found no path injects a preset (add_captions/UI/profile all gate inactive → nil). Schemas now state opt-in; explicit request → word granularity. |
 
 ## FIX-B — onset boundary retiming on resync
 
@@ -25,8 +26,8 @@ Phase 2 complete. Ready for Evaluator.
 ## Verification (this branch)
 
 - `swift build` — clean.
-- `swift test` (full) — 1198/1198 pass.
-- New: CaptionResyncRetimeTests (7), granularity render/parse tests (11), OnsetRefiner cap (1).
+- `swift test` (full) — 1205/1205 pass.
+- New: CaptionResyncRetimeTests (7), granularity render/parse tests (11), OnsetRefiner cap (1), off-by-default lock-in (7).
 
 ---
 
