@@ -2255,7 +2255,7 @@ struct SetClipPropertiesTests {
         #expect(animation?.highlight == highlight)
     }
 
-    @Test func updateTextContentClearsWordTimings() async {
+    @Test func updateTextContentRetimesSurvivingWordTimings() async {
         var clip = Fixtures.clip(id: "title", mediaRef: "text", mediaType: .text, start: 0, duration: 60)
         clip.textContent = "old text"
         clip.textStyle = TextStyle()
@@ -2271,6 +2271,29 @@ struct SetClipPropertiesTests {
         ])
 
         #expect(result.isError == false, "\(ToolHarness.textOf(result))")
-        #expect(h.editor.timeline.tracks[0].clips[0].wordTimings == nil)
+        // "text" survives with its exact old span; "new" is re-interpolated and marked interpolated.
+        #expect(h.editor.timeline.tracks[0].clips[0].wordTimings == [
+            WordTiming(text: "new", startFrame: 0, endFrame: 30, aligned: false),
+            WordTiming(text: "text", startFrame: 30, endFrame: 60),
+        ])
+    }
+
+    @Test func updateTextFullRewriteClearsWordTimings() async {
+        var clip = Fixtures.clip(id: "title", mediaRef: "text", mediaType: .text, start: 0, duration: 60)
+        clip.textContent = "old text"
+        clip.textStyle = TextStyle()
+        clip.wordTimings = [
+            WordTiming(text: "old", startFrame: 0, endFrame: 30),
+            WordTiming(text: "text", startFrame: 30, endFrame: 60),
+        ]
+        let h = ToolHarness(timeline: Fixtures.timeline(tracks: [Fixtures.videoTrack(clips: [clip])]))
+
+        let result = await h.runRaw("update_text", args: [
+            "clipIds": ["title"],
+            "content": "completely different words",
+        ])
+
+        #expect(result.isError == false, "\(ToolHarness.textOf(result))")
+        #expect(h.editor.timeline.tracks[0].clips[0].wordTimings == nil, "no surviving word clears timings")
     }
 }
