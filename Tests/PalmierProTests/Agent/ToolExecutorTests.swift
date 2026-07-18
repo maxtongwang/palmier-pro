@@ -2589,4 +2589,31 @@ struct SetClipPropertiesTests {
         let notes = (json?["notes"] as? [String]) ?? []
         #expect(notes.contains { $0.contains("not promoted to glossary: scattered edits") })
     }
+
+    // A promotion resync over an uncached source must surface the skip (captionResync.skippedNoTranscript)
+    // instead of silently leaving the sibling caption unchanged — and it must not delete it.
+    @Test func updateTextPromotionSurfacesUncachedResyncSkip() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("promote-\(UUID().uuidString).palmier", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        var edited = textClip("cap1", start: 0, duration: 60, content: "陈娘娘")
+        edited.captionGroupId = "g1"
+        var sibling = textClip("cap2", start: 60, duration: 60, content: "陈娘娘")
+        sibling.captionGroupId = "g1"
+        sibling.generatedText = "陈娘娘"  // clean sibling still showing the variant
+        let h = ToolHarness(timeline: Fixtures.timeline(tracks: [Fixtures.videoTrack(clips: [edited, sibling])]))
+        h.editor.projectURL = dir
+        h.editor.captionWordSourceProvider = { _ in FakeWordSource(words: [], uncached: ["m"]) }
+
+        let json = try await h.runOK("update_text", args: [
+            "entries": [["clipId": "cap1", "content": "陈嬢嬢"]],
+        ]) as? [String: Any]
+
+        let resync = json?["captionResync"] as? [String: Any]
+        #expect(resync != nil, "the promotion resync report is surfaced in the response")
+        #expect((resync?["skippedNoTranscript"] as? [String]) == ["m"])
+        let conflicts = resync?["conflicts"] as? [[String: Any]]
+        #expect(conflicts?.contains { ($0["reason"] as? String)?.contains("transcript not cached") == true } == true)
+        // The clean sibling is preserved, not deleted, despite the cold cache.
+        #expect(h.editor.timeline.tracks[0].clips.contains { $0.id == "cap2" })
+    }
 }
