@@ -429,21 +429,38 @@ enum TextFrameRenderer {
         return out
     }
 
+    /// Word tokens for per-word animation: whitespace-separated runs, with each CJK character its
+    /// own token so per-character word timings drive per-character karaoke (a space-less CJK line
+    /// would otherwise collapse to a single span). Mirrors CaptionText.tokens on UTF-16 ranges.
     private static func words(in content: String) -> [(range: NSRange, text: String)] {
         let ns = content as NSString
         let ws = CharacterSet.whitespacesAndNewlines
         // A surrogate half (emoji etc.) maps to no scalar — treat it as part of a word, not whitespace.
-        func isSpace(_ u: unichar) -> Bool { Unicode.Scalar(u).map(ws.contains) ?? false }
-        var result: [(NSRange, String)] = []
-        var i = 0
-        while i < ns.length {
-            while i < ns.length, isSpace(ns.character(at: i)) { i += 1 }
-            guard i < ns.length else { break }
-            let start = i
-            while i < ns.length, !isSpace(ns.character(at: i)) { i += 1 }
-            let r = NSRange(location: start, length: i - start)
-            result.append((r, ns.substring(with: r)))
+        func classify(_ u: unichar) -> (space: Bool, cjk: Bool) {
+            guard let scalar = Unicode.Scalar(u) else { return (false, false) }
+            return (ws.contains(scalar), CaptionText.isCJK(scalar))
         }
+        var result: [(NSRange, String)] = []
+        var runStart = -1
+        func flushRun(_ end: Int) {
+            guard runStart >= 0 else { return }
+            let r = NSRange(location: runStart, length: end - runStart)
+            result.append((r, ns.substring(with: r)))
+            runStart = -1
+        }
+        for i in 0..<ns.length {
+            let c = classify(ns.character(at: i))
+            if c.space {
+                flushRun(i)
+            } else if c.cjk {
+                flushRun(i)
+                let r = NSRange(location: i, length: 1)
+                result.append((r, ns.substring(with: r)))
+            } else if runStart < 0 {
+                runStart = i
+            }
+        }
+        flushRun(ns.length)
         return result
     }
 

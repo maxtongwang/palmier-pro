@@ -98,4 +98,68 @@ struct TextAnimationRenderTests {
             WordTiming(text: "NewYork", startFrame: 10, endFrame: 50),
         ])
     }
+
+    @Test func wordTimingAlignedRoundTripsCodable() throws {
+        let encoder = JSONEncoder()
+        let decoder = JSONDecoder()
+        for aligned in [true, false, nil] as [Bool?] {
+            let w = WordTiming(text: "hi", startFrame: 1, endFrame: 2, aligned: aligned)
+            #expect(try decoder.decode(WordTiming.self, from: encoder.encode(w)) == w)
+        }
+        // Old projects have no `aligned` key — they must still decode (to nil).
+        let legacy = Data(#"{"text":"hi","startFrame":1,"endFrame":2}"#.utf8)
+        let decoded = try decoder.decode(WordTiming.self, from: legacy)
+        #expect(decoded.aligned == nil)
+        #expect(decoded == WordTiming(text: "hi", startFrame: 1, endFrame: 2))
+    }
+
+    /// A space-less CJK line with non-uniform per-character timings: the middle gap must NOT be
+    /// highlighted (per-character spans drive the animation, not one collapsed line span).
+    @Test func cjkHighlightHonoursPerCharacterSpans() {
+        var c = Clip(mediaRef: "", startFrame: 0, durationFrames: 90)
+        c.id = "cjk"
+        c.mediaType = .text
+        c.textContent = "我好"
+        var style = TextStyle()
+        style.color = .init(r: 1, g: 1, b: 1, a: 1)
+        style.shadow.enabled = false
+        style.fontScale = 1.6
+        c.textStyle = style
+        c.transform = Transform(centerX: 0.5, centerY: 0.5, width: 0.9, height: 0.3)
+        c.textAnimation = TextAnimation(preset: .highlightPop, perWordFrames: 6, highlight: .init(r: 1, g: 0.85, b: 0, a: 1))
+        c.wordTimings = [
+            WordTiming(text: "我", startFrame: 0, endFrame: 15, aligned: true),
+            WordTiming(text: "好", startFrame: 75, endFrame: 90, aligned: true),
+        ]
+
+        func yellow(_ frame: Int) -> Int {
+            let px = pixels(c, frame: frame)
+            var n = 0
+            for i in stride(from: 0, to: px.count, by: 4)
+            where px[i] > 180 && px[i + 1] > 150 && px[i + 2] < 90 { n += 1 }
+            return n
+        }
+
+        #expect(yellow(5) > 0, "first character highlighted while it is active")
+        #expect(yellow(82) > 0, "last character highlighted while it is active")
+        #expect(yellow(45) == 0, "the silent gap between characters is never highlighted")
+    }
+
+    @Test func noWordTimingsStillAnimatesUniformly() {
+        var c = Clip(mediaRef: "", startFrame: 0, durationFrames: 90)
+        c.id = "uniform"
+        c.mediaType = .text
+        c.textContent = "ONE TWO THREE"
+        var style = TextStyle()
+        style.color = .init(r: 1, g: 1, b: 1, a: 1)
+        style.shadow.enabled = false
+        style.fontScale = 1.6
+        c.textStyle = style
+        c.transform = Transform(centerX: 0.5, centerY: 0.5, width: 0.9, height: 0.2)
+        c.textAnimation = TextAnimation(preset: .wordPop, perWordFrames: 6)
+        c.wordTimings = nil
+
+        #expect(brightCount(pixels(c, frame: 5)) > 0, "uniform fallback still reveals words")
+        #expect(brightCount(pixels(c, frame: 80)) > brightCount(pixels(c, frame: 5)))
+    }
 }
