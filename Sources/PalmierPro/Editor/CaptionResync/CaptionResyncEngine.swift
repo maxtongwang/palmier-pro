@@ -258,7 +258,7 @@ enum CaptionResyncEngine {
             let rs = min(max(0, w.startFrame - clipStart), duration)
             let re = min(max(rs, w.endFrame - clipStart), duration)
             guard re > rs else { return nil }
-            return WordTiming(text: w.text, startFrame: rs, endFrame: re)
+            return WordTiming(text: w.text, startFrame: rs, endFrame: re, aligned: w.aligned)
         }
     }
 }

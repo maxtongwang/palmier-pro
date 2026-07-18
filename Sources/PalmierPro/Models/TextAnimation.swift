@@ -4,6 +4,16 @@ struct WordTiming: Codable, Sendable, Equatable {
     var text: String
     var startFrame: Int
     var endFrame: Int
+    /// false = timing was interpolated (character-count), not acoustically aligned; nil = unknown
+    /// provenance (pre-feature clip or engine-native timing). Optional so old projects decode.
+    var aligned: Bool?
+
+    init(text: String, startFrame: Int, endFrame: Int, aligned: Bool? = nil) {
+        self.text = text
+        self.startFrame = startFrame
+        self.endFrame = endFrame
+        self.aligned = aligned
+    }
 }
 
 struct TextAnimation: Codable, Sendable, Equatable {

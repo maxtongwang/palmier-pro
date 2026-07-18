@@ -376,7 +376,9 @@ extension ToolExecutor {
             frameMin = min(frameMin, start)
             frameMax = max(frameMax, end)
             if key == modalKey {
-                rows.append([clip["id"] ?? "", start, end, clip["textContent"] ?? ""])
+                var row: [Any] = [clip["id"] ?? "", start, end, clip["textContent"] ?? ""]
+                if timingIsInterpolated(clip) { row.append(false) }
+                rows.append(row)
             } else {
                 deviants.append(clip)
             }
@@ -408,10 +410,21 @@ extension ToolExecutor {
         let shown = Array(rows.prefix(captionRowLimit))
         group["clipFormat"] = captionRowFormat
         group["clips"] = shown
+        var notes: [String] = []
         if shown.count < total {
-            group["clipsNote"] = "Showing \(shown.count) of \(total) caption clips. Page with startFrame/endFrame."
+            notes.append("Showing \(shown.count) of \(total) caption clips. Page with startFrame/endFrame.")
         }
+        if shown.contains(where: { $0.count > captionRowFormat.count }) {
+            notes.append("A trailing `false` marks a clip whose word timings are interpolated (not acoustically aligned) — karaoke timing there is approximate.")
+        }
+        if !notes.isEmpty { group["clipsNote"] = notes.joined(separator: " ") }
         return (group, deviants)
+    }
+
+    /// True when a serialized caption clip carries word timings and at least one is interpolated (aligned == false).
+    private static func timingIsInterpolated(_ clip: [String: Any]) -> Bool {
+        guard let timings = clip["wordTimings"] as? [[String: Any]] else { return false }
+        return timings.contains { ($0["aligned"] as? Bool) == false }
     }
 
     private static func truncate(_ text: String) -> String {

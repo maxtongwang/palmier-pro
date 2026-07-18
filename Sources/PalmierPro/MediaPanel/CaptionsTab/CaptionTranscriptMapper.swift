@@ -39,7 +39,7 @@ enum CaptionTranscriptMapper {
             let midFrame = (start + end) / 2 * rate
             guard midFrame >= visible.start, midFrame < visible.end,
                   let f = timelineFrames(sourceStart: start, sourceEnd: end, clip: clip, fps: fps) else { return nil }
-            return WordTiming(text: word.text, startFrame: f.start, endFrame: f.end)
+            return WordTiming(text: word.text, startFrame: f.start, endFrame: f.end, aligned: word.aligned)
         }
         .sorted { ($0.startFrame, $0.endFrame) < ($1.startFrame, $1.endFrame) }
     }

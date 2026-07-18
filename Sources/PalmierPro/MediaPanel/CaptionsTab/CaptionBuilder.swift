@@ -14,6 +14,7 @@ enum CaptionBuilder {
         var text: String
         var start: Double
         var end: Double
+        var aligned: Bool?
     }
 
     /// General builder: split a transcript segment into caption-sized chunks
@@ -105,10 +106,10 @@ enum CaptionBuilder {
     /// Time phrases from word runs by matching shared characters, so timing holds when
     /// runs don't split on spaces (contractions, split numbers, punctuation runs).
     private static func time(_ texts: [String], segment: TranscriptionSegment, words: [TranscriptionWord]) -> [Phrase] {
-        let timed = words.compactMap { w -> (text: String, count: Int, start: Double, end: Double)? in
+        let timed = words.compactMap { w -> (text: String, count: Int, start: Double, end: Double, aligned: Bool?)? in
             guard let s = w.start, let e = w.end else { return nil }
             let count = alphanumericCount(w.text)
-            return count > 0 ? (w.text, count, s, e) : nil
+            return count > 0 ? (w.text, count, s, e, w.aligned) : nil
         }
         guard !timed.isEmpty else { return distribute(texts, start: segment.start, end: segment.end) }
 
@@ -124,7 +125,7 @@ enum CaptionBuilder {
                 let run = timed[idx]
                 if first == nil { first = (run.start, run.end) }
                 last = (run.start, run.end)
-                spans.append(WordSpan(text: run.text.trimmingCharacters(in: .whitespaces), start: run.start, end: run.end))
+                spans.append(WordSpan(text: run.text.trimmingCharacters(in: .whitespaces), start: run.start, end: run.end, aligned: run.aligned))
                 got += run.count
                 idx += 1
             }
@@ -209,7 +210,7 @@ enum CaptionBuilder {
                 let rs = min(max(0, ws - s), duration)
                 let re = min(max(rs, we - s), duration)
                 guard re > rs else { return nil }
-                return WordTiming(text: w.text, startFrame: rs, endFrame: re)
+                return WordTiming(text: w.text, startFrame: rs, endFrame: re, aligned: w.aligned)
             }
 
             return EditorViewModel.TextClipSpec(
