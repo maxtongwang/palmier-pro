@@ -1,3 +1,29 @@
+# feature/glossary-persistence — Status
+
+Phase 2 complete. Ready for Evaluator. Full `swift build` + full `swift test` green (1266/1266).
+
+| Item | Change                                                                                                                                                 |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| B1a  | promoteCaptionEdit retargets project -> library scope (cross-project reuse)                                                                            |
+| B1b  | glossary.json preserved across save-as/duplicate; Project.glossaryFilename const                                                                       |
+| B1c  | glossary_promote tool (move up scope, higher-precedence wins collision); pure GlossaryPromotion planner; schema + dispatch                             |
+| B1d  | glossary_list notes asserted project-scope terms -> promote                                                                                            |
+| B2   | Classifier widens sub-threshold CJK variant to enclosing NLTokenizer word (开视频->拍视频 promotes); CJK-only; common-vocab guard on minimal span kept |
+| B3   | Corrector enforces Latin word boundaries on the Latin edges of mixed-script variants (AI技术 no longer corrupts OpenAI技术)                            |
+| B4a  | Whitespace-only variants rejected in sanitize (read+write) + corrector skips blank                                                                     |
+| B4b  | Deterministic lexicographic-canonical tie-break for shared variants (match list + word-span lookup)                                                    |
+
+Decisions:
+
+- Added `@TaskLocal GlossaryScope.sharedRootOverride` (nil in production) as a test seam so promotion writes to library/global stay isolated per parallel test. Wrapped the CaptionLint autoApply test (only in-suite library writer) + new glossary tool tests; also gave autoApply test a FixedWordSource so the post-promotion resync rebuilds instead of clearing (no transcript in that unit).
+- glossary_promote is a MOVE (writes toScope, removes from fromScope); collision resolved by scope precedence (promoted wins when its scope is higher precedence).
+
+Deviations:
+
+- Updated the classifier test `doesNotPromoteUnsafeShortVariant` (我的师父->我的狮父) — with B2 it now widens and promotes (师父->狮父); added a no-context nil case (师->狮) in its place.
+
+---
+
 # feature/caption-lint — Status
 
 Phase 2 complete. Ready for Evaluator.
