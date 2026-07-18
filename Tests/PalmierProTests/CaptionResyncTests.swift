@@ -646,3 +646,60 @@ private func timeline(_ tracks: [Track]) -> Timeline {
         #expect(listing() == before)   // TranscriptCache directory untouched — resync never writes L1/L2.
     }
 }
+
+// A1: resync materialises the project glossary onto the cached raw transcript (exactly as caption
+// GENERATION does), so a corrected caption is never silently reverted to the raw mis-heard spelling.
+@MainActor
+@Suite struct CaptionResyncMaterialisationTests {
+    private func openEyeCorrector() -> GlossaryCorrector {
+        GlossaryCorrector(terms: [GlossaryTerm(canonical: "OpenAI", variants: ["open eye"], provenance: "test", confidence: .declared)])
+    }
+    private let rawOpenEye = TranscriptionResult(
+        text: "open eye",
+        language: "en-US",
+        words: [TranscriptionWord(text: "open", start: 0.0, end: 0.5), TranscriptionWord(text: "eye", start: 0.5, end: 1.0)],
+        segments: [TranscriptionSegment(text: "open eye", start: 0.0, end: 1.0)]
+    )
+    private func provider(_ corrector: GlossaryCorrector, source: Clip) -> TimelineTranscriptProvider {
+        let frag = TimelineTranscriptProvider.Fragment(clip: source, url: URL(fileURLWithPath: "/tmp/m.mov"), mediaRef: "m")
+        return TimelineTranscriptProvider(fragments: [frag], fps: 30, corrector: corrector, read: { _ in self.rawOpenEye })
+    }
+    private func source() -> Clip { Fixtures.clip(id: "a", mediaRef: "m", mediaType: .audio, start: 0, duration: 90) }
+
+    @Test func providerMaterialisesCorrectionOntoCachedWords() {
+        let words = provider(openEyeCorrector(), source: source()).audibleWords(in: 0..<90)
+        #expect(words.contains { $0.text == "OpenAI" }, "corrected canonical surfaces")
+        #expect(!words.contains { $0.text == "open" }, "raw mis-hearing never reaches the engine")
+    }
+
+    // (a) A clean caption generated as "OpenAI" is not reverted to the raw "open eye" by a resync.
+    @Test func cleanCorrectedCaptionIsNeverRevertedToRaw() {
+        let cap = captionClip(id: "cap", start: 0, duration: 30, text: "OpenAI", generatedText: "OpenAI")
+        let tl = timeline([Fixtures.audioTrack(clips: [source()]), Fixtures.videoTrack(clips: [cap])])
+        let plan = CaptionResyncEngine.plan(
+            timeline: tl, triggerSpans: [0..<30], trigger: "Trim Clip", fps: 30,
+            policy: .preserve, wordSource: provider(openEyeCorrector(), source: source()), chunk: singleChunk)
+        #expect(plan.replacements.allSatisfy { $0.clipId != "cap" }, "corrected clean clip needs no change")
+        #expect(!plan.replacements.contains { $0.text.contains("open eye") }, "raw spelling never written back")
+    }
+
+    // (b) §5.2 glossary-add propagation: a clean clip still showing the raw text is corrected on resync.
+    @Test func glossaryAddPropagatesCorrectionToCleanCaption() {
+        let cap = captionClip(id: "cap", start: 0, duration: 30, text: "open eye", generatedText: "open eye")
+        let tl = timeline([Fixtures.audioTrack(clips: [source()]), Fixtures.videoTrack(clips: [cap])])
+        let plan = CaptionResyncEngine.plan(
+            timeline: tl, triggerSpans: [0..<30], trigger: "glossary_add", fps: 30,
+            policy: .preserve, wordSource: provider(openEyeCorrector(), source: source()), chunk: singleChunk)
+        #expect(plan.replacements.first { $0.clipId == "cap" }?.text == "OpenAI")
+    }
+
+    // (c) glossary_remove: with the term gone the corrector is empty, so the clip reverts to raw text.
+    @Test func glossaryRemoveRevertsCleanCaptionToRaw() {
+        let cap = captionClip(id: "cap", start: 0, duration: 30, text: "OpenAI", generatedText: "OpenAI")
+        let tl = timeline([Fixtures.audioTrack(clips: [source()]), Fixtures.videoTrack(clips: [cap])])
+        let plan = CaptionResyncEngine.plan(
+            timeline: tl, triggerSpans: [0..<30], trigger: "glossary_remove", fps: 30,
+            policy: .preserve, wordSource: provider(GlossaryCorrector(terms: []), source: source()), chunk: singleChunk)
+        #expect(plan.replacements.first { $0.clipId == "cap" }?.text == "open eye")
+    }
+}

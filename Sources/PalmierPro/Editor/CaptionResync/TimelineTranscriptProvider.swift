@@ -1,14 +1,19 @@
 // TimelineTranscriptProvider — cache-only CaptionWordSource for reactive resync. Reads transcripts
-// already on disk and maps their words to project frames; never triggers ASR and never writes,
-// which is the L1/L2 read-only guarantee the resync engine depends on.
+// already on disk, materialises the project glossary onto them (the same correction caption
+// GENERATION applies via applyingGlossary), then maps their words to project frames. Never triggers
+// ASR and never writes, which is the L1/L2 read-only guarantee the resync engine depends on.
 
 import Foundation
 
 final class TimelineTranscriptProvider: CaptionWordSource {
-    private struct Fragment { let clip: Clip; let url: URL; let mediaRef: String }
+    struct Fragment { let clip: Clip; let url: URL; let mediaRef: String }
     private let fragments: [Fragment]
     private let fps: Int
-    private var transcripts: [URL: TranscriptionResult?] = [:]  // memoized disk reads; stored nil = no cache
+    // Loaded once per provider (one resync = one glossary load) and applied per unique cached read,
+    // so resync sees exactly the corrected text generation produced instead of the raw mis-heard ASR.
+    private let corrector: GlossaryCorrector
+    private let read: (URL) -> TranscriptionResult?
+    private var transcripts: [URL: TranscriptionResult?] = [:]  // memoized materialised reads; stored nil = no cache
 
     /// Snapshots the editor's audible source clips (the same set get_transcript uses) on the main actor.
     @MainActor
@@ -20,6 +25,21 @@ final class TimelineTranscriptProvider: CaptionWordSource {
         }
         self.fragments = frags
         self.fps = editor.timeline.fps
+        self.corrector = GlossaryStore.load(projectURL: editor.projectURL).corrector()
+        self.read = { TranscriptCache.cachedOnDisk(for: $0) }
+    }
+
+    /// Test seam: inject fragments, the glossary corrector, and the raw-transcript reader directly.
+    init(
+        fragments: [Fragment],
+        fps: Int,
+        corrector: GlossaryCorrector,
+        read: @escaping (URL) -> TranscriptionResult? = { TranscriptCache.cachedOnDisk(for: $0) }
+    ) {
+        self.fragments = fragments
+        self.fps = fps
+        self.corrector = corrector
+        self.read = read
     }
 
     func audibleWords(in range: Range<Int>) -> [WordTiming] {
@@ -49,7 +69,7 @@ final class TimelineTranscriptProvider: CaptionWordSource {
 
     private func transcript(for url: URL) -> TranscriptionResult? {
         if let memo = transcripts[url] { return memo }
-        let loaded = TranscriptCache.cachedOnDisk(for: url)
+        let loaded = read(url).map { $0.applyingGlossary(corrector) }
         transcripts[url] = loaded
         return loaded
     }
