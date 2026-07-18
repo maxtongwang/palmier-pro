@@ -420,6 +420,26 @@ struct ToolExecutorReadOnlyTests {
         #expect(rows?.first?[3] as? String == "one")
     }
 
+    @Test func getTimelineDetailFlagsInterpolatedCaptionTiming() async throws {
+        var aligned = Self.captionClip(id: "cap-0", gid: "g1", start: 0, duration: 30, text: "one")
+        aligned.wordTimings = [WordTiming(text: "one", startFrame: 0, endFrame: 30, aligned: true)]
+        var interpolated = Self.captionClip(id: "cap-1", gid: "g1", start: 30, duration: 30, text: "two")
+        interpolated.wordTimings = [WordTiming(text: "two", startFrame: 0, endFrame: 30, aligned: false)]
+        let timeline = Fixtures.timeline(tracks: [Fixtures.videoTrack(clips: [aligned, interpolated])])
+        let h = ToolHarness(timeline: timeline)
+
+        let detail = try await h.runOK("get_timeline", args: ["captionDetail": true]) as? [String: Any]
+        let group = Self.firstCaptionGroup(detail)
+        let rows = group?["clips"] as? [[Any]]
+        let alignedRow = rows?.first { $0[0] as? String == "cap-0" }
+        let interpolatedRow = rows?.first { $0[0] as? String == "cap-1" }
+
+        #expect(alignedRow?.count == 4, "an aligned caption has no trailing flag")
+        #expect(interpolatedRow?.count == 5, "an interpolated caption carries a trailing flag")
+        #expect(interpolatedRow?.last as? Bool == false)
+        #expect((group?["clipsNote"] as? String)?.contains("interpolated") == true)
+    }
+
     @Test func getTimelineListsDeviantCaptionClipsIndividually() async throws {
         var clips = (0..<3).map { i in
             Self.captionClip(id: "cap-\(i)", gid: "g1", start: i * 30, duration: 30, text: "t\(i)")
