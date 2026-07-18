@@ -1,65 +1,41 @@
-# feature/transcription-model — Status
+# feature/caption-lint — Status
 
 Phase 2 complete. Ready for Evaluator.
 
-## Scope
+## caption_lint — transcript-correction lint stage
 
-Make the transcription model visible and configurable from the MCP layer. Root cause: a captioning
-run silently used local (Qwen3) because the account lacked cloud credits, and the model was invisible
-to agents — only `transcriptionSource local|cloud` leaked out, and the local engine choice was an
-undocumented app-global UserDefaults key.
+| Area       | Change                                                                                                                                                                                                                     |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Core       | CaptionLinter (pure): flag/context/partition + JSON parse; LintExclusions masks glossary + filler terms                                                                                                                    |
+| Completer  | LintCompleter protocol; AgentLintCompleter drains AgentClient.stream (tools:[]); reachable() mirrors selectClient                                                                                                          |
+| Tool       | ToolExecutor+CaptionLint builds windows from caption text clips w/ neighbour context; paged (200/call)                                                                                                                     |
+| Degrade    | flags → context (never errors) when LLM unreachable (nil completer) or the call throws                                                                                                                                     |
+| AutoApply  | opt-in autoApplyThreshold routes ≥threshold via update_text(origin:"user") → glossary promotion synergy                                                                                                                    |
+| Exclusions | glossary variants/canonicals + caption-style removeAlways/caseByCase/neverRemove/protectedPhrases; masked on the CHANGED tokens only (diff original→suggestion), so an excluded term in unchanged context never suppresses |
+| Registered | ToolName.captionLint + ToolExecutor.run + ToolDefinitions schema (flag-only default, both modes documented)                                                                                                                |
 
-## Deliverables
+## LLM call path found
 
-| #   | Area            | Change                                                                                                                                                                                       |
-| --- | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | Docs            | Inline doc at both decision points: engine routing (Transcription.transcribe) + cloud-vs-local (resolveTranscriptionProvider).                                                               |
-| 2   | Preference      | TranscriptionPreference auto\|cloud\|local persisted in project.json (ProjectFile, tolerant); set via set_project_settings. cloud fails loudly (actionable ToolError) rather than degrading. |
-| 3   | Engine override | SKIPPED — see below.                                                                                                                                                                         |
-| 4   | Resolved model  | TranscriptionResult.model stamped at engine/provider boundary; surfaced as transcriptionModel + transcriptionSource in get_transcript, add_captions, inspect_media.                          |
-| 5   | Fallback notice | transcriptionNote on get_transcript/add_captions only when preference==auto degraded to local.                                                                                               |
+- App's only primitive is streaming `AgentClient.stream(system:tools:messages:)` (AgentClientTypes.swift). No one-shot API.
+- Model selection is private on the per-editor `AgentService`; MCP ToolExecutor path has no AgentService.
+- Auth mirrors AgentService.canStream: personal Anthropic key (AnthropicKeychain) OR signed-in account WITH credits (AccountService.shared.isSignedIn && hasCredits). This project's user is NOT signed in (canGenerate:false) → CaptionLintClient.reachable() returns nil → context mode is the primary path.
+- Completer stubbed behind LintCompleter protocol; no network in tests.
 
-## Selection logic (documented)
+## Evaluator fix round 1
 
-- Engine routing (Transcription.transcribe): local engine read from app-global `localSpeechEngine`
-  UserDefaults (qwen3 default \| whisper \| apple). qwen3/whisper run first; on failure the code falls
-  through to Apple SpeechTranscriber. The model that ran is stamped onto the result (withModel).
-- Cloud-vs-local (ToolExecutor.resolveTranscriptionProvider, pure/testable): auto → cloud when the
-  signed-in account can afford the uncached request else local (fellBackToLocal set); cloud → cloud or
-  throw; local → always local. estimatedCost==0 counts as affordable (cached reads stay on cloud).
-
-## Deliverable 3 — SKIP rationale
-
-Per-project localEngine override was skipped. The engine is resolved from global state at the BOTTOM of
-the stack, in two coupled places: (1) Transcription.transcribe reads LocalSpeechEngine.current for
-routing, and (2) TranscriptCache salts the cache key with LocalSpeechEngine.current.cacheTag. A
-per-project override would have to thread an `engine:` parameter through TranscriptCache.transcript →
-Transcription.transcribe/transcribeVideoAudio AND fold that engine's cacheTag into the cache-key
-derivation (else two projects with different engines collide). That is a cross-cutting change to the
-transcribe/cache contract — exactly the "complicates the singleton assumptions" case the deliverable
-said to skip. The engines themselves (Qwen3ASREngine.shared/WhisperKitEngine.shared) are stateless
-singletons and are not the blocker; the global read + cache-key coupling is. Clean follow-up: add
-`engine: LocalSpeechEngine` to TranscriptCache.transcript and Transcription.transcribe, deriving the
-cache tag from the passed engine.
+- F1 (blocker) — exclusion over-drop fixed: excludesChange(original:suggestion:) diffs the two token sequences (common-prefix/suffix) and suppresses only when a CHANGED token falls inside an excluded term's span. Unchanged surrounding tokens no longer suppress. Regressions: 视频-excluded / 开视频→拍视频 still flagged; adjacent 呃 still flagged; a suggestion that edits the excluded term itself is dropped.
+- F2 — response field transcriptionSource → lintSource (schema updated).
+- F3 — reachable() now requires isSignedIn && hasCredits (mirrors canStream); a zero-credit signed-in user degrades to context.
+- F4 — paging switched from a count+frame cursor to a clipId cursor over the total (startFrame,endFrame,clipId) order: response carries nextClipId; continue via afterClipId. No overlapping-window reprocessing.
 
 ## Verification
 
 - `swift build` — clean.
-- `swift test` (full) — 1228/1228 pass.
-- New: TranscriptionModelSelectionTests (23 @Test) — preference matrix, cloud+no-credits error, model
-  threading per engine, fallback-notice-only-on-auto-fallback, ProjectFile round-trip + legacy decode,
-  set_project_settings surface. GetTranscriptParamTests updated for the new resolvedModel field.
-
-## Integration note (sibling feature/caption-lint)
-
-ToolDefinitions/ToolExecutor edits kept additive: set_project_settings gained one property; add_captions
-gained response keys; no existing tool entries removed or reordered.
+- `swift test` (full) — 1224/1224 pass. CaptionLintTests (18): 9 core (开视频→拍视频 flag, filler+glossary exclusion, 3 F1 changed-token regressions, context windows, partition gating, absent-original drop, registration) + 9 tool (flag-only, autoApply ≥threshold rewrites clip, below-threshold, built-in filler excluded, context no-call, unreachable degrade, failure degrade, paging cursor emits each window once, no-captions note).
 
 ---
 
 # fix/caption-anim-onset — Status
-
-Phase 2 complete. Ready for Evaluator.
 
 ## FIX-A — animation granularity (per-char now opt-in) + off by default
 
