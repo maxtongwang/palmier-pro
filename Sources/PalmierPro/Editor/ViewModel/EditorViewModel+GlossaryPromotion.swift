@@ -40,15 +40,9 @@ extension EditorViewModel {
             canonical: canonical, variants: [variant],
             provenance: "auto:caption-edit@\(clipId)", confidence: .asserted
         )
-        let otherCanonicals = Set(GlossaryStore.load(projectURL: projectURL).merged().map(\.term.canonical)).subtracting([canonical])
-        let sanitized = GlossaryValidation.sanitize(term, otherCanonicals: otherCanonicals)
-        guard !sanitized.term.variants.isEmpty else { return nil }
-        guard var doc = try? GlossaryStore.read(scope: .library, projectURL: projectURL) else { return nil }
-        doc.terms.removeAll { $0.canonical == sanitized.term.canonical }
-        doc.terms.append(sanitized.term)
-        guard (try? GlossaryStore.write(doc, scope: .library, projectURL: projectURL)) != nil else { return nil }
-        GlossaryStore.load(projectURL: projectURL).applyBias()
-        return (sanitized.term.canonical, sanitized.term.variants)
+        guard let result = try? glossaryWriteUpsert(term, scope: .library),
+              !result.term.variants.isEmpty else { return nil }
+        return (result.term.canonical, result.term.variants)
     }
 
     /// Inspector-origin caption edit: run the shared promotion chain and, on a promotion, resync sibling
