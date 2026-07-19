@@ -778,3 +778,237 @@ private func timeline(_ tracks: [Track]) -> Timeline {
         #expect(plan.report.conflicts.isEmpty)
     }
 }
+
+// MARK: - Resync-visibility UI cluster (A1 toast, A3 resolve, A4 freeze, A5 promotion parity)
+
+@MainActor
+@Suite struct CaptionResyncToastDecisionTests {
+    private func report(updated: Int = 0, removed: Int = 0, created: Int = 0, conflicts: Int = 0, retimed: Int = 0) -> CaptionResyncReport {
+        var r = CaptionResyncReport(trigger: "t")
+        r.updated = (0..<updated).map { .init(clipId: "u\($0)", before: "a", after: "b") }
+        r.removed = (0..<removed).map { .init(clipId: "r\($0)", text: "x") }
+        r.created = (0..<created).map { .init(clipId: "c\($0)", text: "y", startFrame: 0, endFrame: 30) }
+        r.conflicts = (0..<conflicts).map { .init(clipId: "k\($0)", manualText: "m", newTranscript: "n") }
+        r.retimed = (0..<retimed).map { .init(clipId: "t\($0)", beforeStart: 0, beforeEnd: 30, afterStart: 5, afterEnd: 30) }
+        return r
+    }
+
+    @Test func emptyReportProducesNoToast() {
+        #expect(report().uiToast == nil)
+    }
+
+    @Test func retimedOnlyProducesNoToast() {
+        #expect(report(retimed: 3).uiToast == nil)   // boundary nudges are too noisy to surface
+    }
+
+    @Test func contentChangesToastAsSuccess() {
+        let toast = report(updated: 3, removed: 1).uiToast
+        #expect(toast?.message == "Captions resynced · 3 updated, 1 removed.")
+        #expect(toast?.kind == .success)
+    }
+
+    @Test func createdCountsAsAdded() {
+        #expect(report(created: 2).uiToast?.message == "Captions resynced · 2 added.")
+    }
+
+    @Test func conflictsOnlyToastAsWarning() {
+        let toast = report(conflicts: 2).uiToast
+        #expect(toast?.message == "2 captions kept manual text — see inspector.")
+        #expect(toast?.kind == .warning)
+    }
+
+    @Test func singleConflictIsSingular() {
+        #expect(report(conflicts: 1).uiToast?.message == "1 caption kept manual text — see inspector.")
+    }
+
+    @Test func contentPlusConflictsToastAsWarning() {
+        let toast = report(updated: 1, conflicts: 2).uiToast
+        #expect(toast?.message == "Captions resynced · 1 updated. 2 kept manual text.")
+        #expect(toast?.kind == .warning)
+    }
+}
+
+@MainActor
+@Suite struct CaptionResyncToastPresentationTests {
+    private func editor() -> EditorViewModel {
+        let e = EditorViewModel()
+        e.timeline = timeline([Fixtures.videoTrack(clips: [captionClip(id: "cap", start: 0, duration: 60, text: "x", generatedText: "x")])])
+        return e
+    }
+
+    @Test func uiOriginReportFiresToastAndConsumes() {
+        let e = editor()
+        var r = CaptionResyncReport(trigger: "Trim Clip")
+        r.updated = [.init(clipId: "cap", before: "a", after: "b")]
+        e.lastResyncReport = r
+
+        e.presentReactiveResyncToastIfNeeded()
+        #expect(e.mediaPanelToast?.message == "Captions resynced · 1 updated.")
+        #expect(e.lastResyncReport == nil)   // consumed, so it can't fire twice
+    }
+
+    @Test func agentConsumedReportProducesNoToast() {
+        let e = editor()
+        var r = CaptionResyncReport(trigger: "Move Clips (Agent)")
+        r.updated = [.init(clipId: "cap", before: "a", after: "b")]
+        e.lastResyncReport = r
+        _ = e.takeResyncReport()   // the tool layer already consumed it for its delta
+
+        e.presentReactiveResyncToastIfNeeded()
+        #expect(e.mediaPanelToast == nil)
+    }
+
+    @Test func retimedOnlyReportProducesNoToastButConsumes() {
+        let e = editor()
+        var r = CaptionResyncReport(trigger: "Trim Clip")
+        r.retimed = [.init(clipId: "cap", beforeStart: 0, beforeEnd: 30, afterStart: 5, afterEnd: 30)]
+        e.lastResyncReport = r
+
+        e.presentReactiveResyncToastIfNeeded()
+        #expect(e.mediaPanelToast == nil)
+        #expect(e.lastResyncReport == nil)
+    }
+}
+
+@MainActor
+@Suite struct CaptionConflictResolveTests {
+    private func editorWithConflict(text: String, generatedText: String?, words: [WordTiming]) -> EditorViewModel {
+        let e = EditorViewModel()
+        let cap = captionClip(id: "cap", start: 0, duration: 60, text: text, generatedText: generatedText, conflict: true)
+        e.timeline = timeline([
+            Fixtures.videoTrack(clips: [cap]),
+            Fixtures.audioTrack(clips: [Fixtures.clip(id: "audio", mediaRef: "m", mediaType: .audio, start: 0, duration: 60)]),
+        ])
+        e.captionWordSourceProvider = { _ in FakeWordSource(words: words) }
+        return e
+    }
+
+    @Test func keepMineClearsFlagAndKeepsText() {
+        let e = editorWithConflict(text: "my words", generatedText: nil, words: [word("real", 0, 30), word("text", 30, 60)])
+        e.keepManualCaptionText(clipIds: ["cap"])
+        let cap = e.clipFor(id: "cap")
+        #expect(cap?.resyncConflict == nil)
+        #expect(cap?.textContent == "my words")   // manual text untouched
+    }
+
+    @Test func useTranscriptReplacesTextAndClearsFlag() {
+        let e = editorWithConflict(text: "my words", generatedText: nil, words: [word("real", 0, 30), word("text", 30, 60)])
+        e.useTranscriptForCaptionConflicts(clipIds: ["cap"])
+        let cap = e.clipFor(id: "cap")
+        #expect(cap?.textContent == "real text")
+        #expect(cap?.resyncConflict == nil)
+    }
+
+    @Test func resolveConsumesReportSoNoStrayToast() {
+        let e = editorWithConflict(text: "my words", generatedText: nil, words: [word("real", 0, 30), word("text", 30, 60)])
+        e.useTranscriptForCaptionConflicts(clipIds: ["cap"])
+        #expect(e.lastResyncReport == nil)   // deliberate resolve is not an A1 reactive toast
+    }
+
+    @Test func resolveIgnoresUnflaggedClips() {
+        let e = EditorViewModel()
+        e.timeline = timeline([Fixtures.videoTrack(clips: [captionClip(id: "clean", start: 0, duration: 60, text: "keep", generatedText: "keep")])])
+        e.captionWordSourceProvider = { _ in FakeWordSource(words: [word("other", 0, 60)]) }
+        e.useTranscriptForCaptionConflicts(clipIds: ["clean"])
+        #expect(e.clipFor(id: "clean")?.textContent == "keep")   // not flagged → untouched
+    }
+}
+
+@MainActor
+@Suite struct CaptionResyncExemptEngineTests {
+    // A4: the engine honors resyncExempt by skipping the clip entirely — no replace, remove, or flag.
+    @Test func exemptClipIsSkippedEntirely() {
+        let caption = captionClip(id: "cap", start: 0, duration: 60, text: "frozen title", generatedText: "frozen title", exempt: true)
+        let tl = timeline([Fixtures.videoTrack(clips: [caption])])
+        let src = FakeWordSource(words: [word("brand", 0, 30), word("new", 30, 60)])
+
+        let plan = CaptionResyncEngine.plan(
+            timeline: tl, triggerSpans: [0..<60], trigger: "Trim Clip", fps: 30,
+            policy: .overwrite, wordSource: src, chunk: singleChunk)
+
+        #expect(!plan.hasWork)                                   // even overwrite leaves an exempt clip alone
+        #expect(plan.report.isEmpty)
+        #expect(!plan.replacements.contains { $0.clipId == "cap" })
+        #expect(!plan.removals.contains("cap"))
+        #expect(!plan.flagged.contains("cap"))
+    }
+}
+
+@MainActor
+@Suite("Caption inspector-edit promotion parity", .isolatedGlossaryRoot)
+struct CaptionPromotionParityTests {
+    private func projectDir() -> URL {
+        FileManager.default.temporaryDirectory.appendingPathComponent("promote-\(UUID().uuidString).palmier", isDirectory: true)
+    }
+
+    private func harness(dir: URL) -> ToolHarness {
+        var cap = captionClip(id: "cap", start: 0, duration: 60, text: "陈娘娘", generatedText: nil)
+        cap.mediaRef = "m"
+        let h = ToolHarness(timeline: timeline([Fixtures.videoTrack(clips: [cap])]))
+        h.editor.projectURL = dir
+        h.editor.captionWordSourceProvider = { _ in FakeWordSource(words: [], uncached: ["m"]) }
+        return h
+    }
+
+    // The inspector helper promotes the identical single-substitution the MCP path does (娘娘→嬢嬢),
+    // marking the clip clean so later resyncs don't log a false conflict. §5.1
+    @Test func inspectorEditPromotesLikeUpdateText() {
+        let dir = projectDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let h = harness(dir: dir)
+
+        let promotion = h.editor.promoteCaptionEditIfClean(old: "陈娘娘", new: "陈嬢嬢", clipId: "cap")
+        #expect(promotion?.storedCanonical == "嬢嬢")
+        #expect(promotion?.storedVariants == ["娘娘"])
+        #expect(promotion?.canonical == "嬢嬢" && promotion?.variant == "娘娘")
+        #expect(h.editor.clipFor(id: "cap")?.generatedText == "陈嬢嬢")   // §5.1 clean-mark
+    }
+
+    @Test func inspectorWrapperFiresLearnedToastOnPromotion() {
+        let dir = projectDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let h = harness(dir: dir)
+        h.editor.commitClipProperty(clipId: "cap") { _ = $0.setCaptionContent("陈嬢嬢") }
+
+        h.editor.promoteInspectorCaptionEdit(old: "陈娘娘", new: "陈嬢嬢", clipId: "cap")
+        #expect(h.editor.mediaPanelToast?.message == "Learned 嬢嬢 — future transcripts corrected.")
+        #expect(h.editor.mediaPanelToast?.kind == .success)
+        #expect(h.editor.lastResyncReport == nil)   // §5.2 report consumed, no stray A1 toast
+    }
+
+    @Test func nonPromotingEditStaysSilent() {
+        let dir = projectDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let h = harness(dir: dir)
+        // Scattered multi-region edit does not promote.
+        h.editor.promoteInspectorCaptionEdit(old: "我们住的酒店是", new: "我们的酒店", clipId: "cap")
+        #expect(h.editor.mediaPanelToast == nil)
+        #expect(h.editor.clipFor(id: "cap")?.generatedText == nil)   // no clean-mark
+    }
+
+    @Test func ungroupedClipDoesNotPromote() {
+        let dir = projectDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        var loose = captionClip(id: "loose", start: 0, duration: 60, text: "陈娘娘", generatedText: nil)
+        loose.captionGroupId = nil   // a hand-placed title, not part of a caption group
+        let h = ToolHarness(timeline: timeline([Fixtures.videoTrack(clips: [loose])]))
+        h.editor.projectURL = dir
+        #expect(h.editor.promoteCaptionEditIfClean(old: "陈娘娘", new: "陈嬢嬢", clipId: "loose") == nil)
+    }
+
+    // An edit already promoted via the inspector must not double-promote when the same content later
+    // flows through MCP update_text: the clip is clean (old == new) so it never enters the edit set.
+    @Test func noDoublePromotionAcrossInspectorThenMCP() async throws {
+        let dir = projectDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let h = harness(dir: dir)
+        h.editor.commitClipProperty(clipId: "cap") { _ = $0.setCaptionContent("陈嬢嬢") }
+        h.editor.promoteInspectorCaptionEdit(old: "陈娘娘", new: "陈嬢嬢", clipId: "cap")
+        h.editor.mediaPanelToast = nil
+
+        let json = try await h.runOK("update_text", args: [
+            "entries": [["clipId": "cap", "content": "陈嬢嬢"]],
+        ]) as? [String: Any]
+        #expect(json?["promoted"] == nil)   // same content → no edit → no second promotion
+    }
+}
