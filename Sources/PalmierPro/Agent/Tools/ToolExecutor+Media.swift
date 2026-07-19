@@ -177,7 +177,10 @@ extension ToolExecutor {
         )
         async let transcriptTask: Result<TranscriptionResult, Error>? = {
             guard hasAudio else { return nil }
-            do { return .success(try await TranscriptCache.shared.transcript(for: url, isVideo: true, range: range, preferredLocale: preferredLocale, engine: localEngine)) }
+            // Interactive read: preempt background indexing on the shared qwen3 actor.
+            do { return .success(try await BackgroundTranscriptionGate.shared.read {
+                try await TranscriptCache.shared.transcript(for: url, isVideo: true, range: range, preferredLocale: preferredLocale, engine: localEngine)
+            }) }
             catch { return .failure(error) }
         }()
 
@@ -296,7 +299,10 @@ extension ToolExecutor {
         let localEngine = editor.resolvedLocalEngine
         let transcript: TranscriptionResult
         do {
-            transcript = try await TranscriptCache.shared.transcript(for: asset.url, isVideo: false, range: range, preferredLocale: preferredLocale, engine: localEngine)
+            // Interactive read: preempt background indexing on the shared qwen3 actor.
+            transcript = try await BackgroundTranscriptionGate.shared.read {
+                try await TranscriptCache.shared.transcript(for: asset.url, isVideo: false, range: range, preferredLocale: preferredLocale, engine: localEngine)
+            }
         } catch {
             throw ToolError("Transcription failed: \(error.localizedDescription)")
         }

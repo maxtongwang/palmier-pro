@@ -1,3 +1,56 @@
+# fix/lazy-reindex — Status
+
+Phase 2 complete. Ready for Evaluator. Full `swift build` + full `swift test` (1358/1358) green.
+
+## Mechanism (verified)
+
+| Step      | Finding                                                                                                                                       |
+| --------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| Bump      | `LocalSpeechEngine.qwen3.cacheTag` qw6→qw7 changed the disk key; qw6 entries orphaned, `hasCachedOnDisk` false for all                        |
+| Eager     | `projectOpened`→`sweep` schedules ALL library assets; `preflight` marks every one `needsTranscript`; `indexOne` transcribes each              |
+| Serialize | Background transcripts run on `Qwen3ASREngine` (actor); 293 queue up                                                                          |
+| Blocked   | `get_transcript`→`timelineWords`→`transcriptsByURL` awaited `TranscriptCache.transcript` on the SAME actor → queued behind the 293 → MCP hang |
+| Counter   | UI "n/m" = `SearchIndexCoordinator.batchCompleted/batchTotal` (MediaTab+IndexStatus)                                                          |
+
+## Fixes
+
+| #          | Change                                                                                                                                                                                                                                                        |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1 lazy     | `SearchIndexCoordinator.process` gates spoken transcription via `shouldBackgroundTranscribe` — only for assets an OPEN timeline uses; off-timeline media is visual-indexed only, transcribed lazily on read                                                   |
+| 1b stale   | `TranscriptCache.cachedOnDiskAllowingStale` falls back to `LocalSpeechEngine.priorCacheTags` (qw6); `TranscriptSearch` flags `stale` hits; `cachedOnDisk` (resync/glossary) unchanged                                                                         |
+| 2 scoped   | Cost lands where reads happen (falls out of 1); glossary_apply/resync/project-open verified not to fan out                                                                                                                                                    |
+| 3 priority | `sweep` orders via `prioritized` (active→open→rest); worker calls `BackgroundTranscriptionGate.waitUntilIdle` between items so reads preempt                                                                                                                  |
+| 4 nonblock | `get_transcript` returns cached clips now + `pending[]` markers; `graceBoundedLocalTranscripts` (3s constant `uncachedReadGrace`) fires lazy transcription but bounds the wait; scoped reads only await their own clip; response gains `indexing{done,total}` |
+
+## Per-reader stale-vs-regenerate decision
+
+| Reader                                | Behavior                                    | Why                                                                        |
+| ------------------------------------- | ------------------------------------------- | -------------------------------------------------------------------------- |
+| Spoken search (`TranscriptSearch`)    | Stale fallback (qw6), flagged               | Keyword recall; pre-punctuation text is fine, better than blank            |
+| `get_transcript` full read            | Regenerate under qw7 (lazy, grace-bounded)  | Needs current word stream; pending marker instead of block                 |
+| Resync (`TimelineTranscriptProvider`) | Current tag only, skip uncached (unchanged) | Retiming must match the qw7 text generation produced; stale would mis-time |
+| glossary_apply                        | Current tag only, skip uncached (unchanged) | Same correctness concern; not the reported path                            |
+
+## Files
+
+- `Transcription/BackgroundTranscriptionGate.swift` (new) — read/background preemption
+- `Transcription/LocalSpeechEngine.swift` — `priorCacheTags`
+- `Transcription/TranscriptCache.swift` — `.localTag` variant, `cachedOnDiskAllowingStale`
+- `Transcription/TranscriptSearch.swift` — stale fallback + `Hit.stale`
+- `Search/SearchIndexCoordinator.swift` — timeline-ref providers, `shouldBackgroundTranscribe`, `prioritized`, worker yield
+- `Editor/ViewModel/EditorViewModel.swift` — `mediaRefs(inTimelines:)` + provider wiring
+- `Agent/Tools/ToolExecutor+Transcription.swift` — grace-bounded reads, pending/indexing payload, read bracket
+- `Agent/Tools/ToolExecutor+Media.swift` — inspect_media read bracket
+- `Agent/Tools/ToolExecutor+Search.swift` — surface `stale` in spoken results
+- Tests: `Search/LazyReindexTests.swift`, `Transcription/StaleFallbackReadTests.swift`
+
+## Deviations
+
+- inspect_media stays blocking on its ONE target (no "unrelated" assets to defer) but brackets the read gate to preempt background. Non-blocking pending shape is get_transcript-only.
+- Cloud and forced-locale reads keep the existing blocking TaskGroup (not the serialized-actor bug; locale bypasses cache by design).
+
+---
+
 # feature/tool-ergonomics — Status (wsD)
 
 Phase 2 complete. Ready for Evaluator. Full `swift build` + full `swift test` (1264/1264) green.

@@ -38,6 +38,11 @@ struct TimelineTranscript {
     let skipped: [[String: Any]]
     /// The model that produced the transcripts behind these words (e.g. "qwen3-asr-0.6B-int8", "cloud").
     let resolvedModel: String
+    /// Clips whose transcript wasn't ready within the grace window; their transcription is running.
+    /// Each entry: {clipId, mediaRef, status}. Poll again — a later read returns them as words.
+    var pending: [[String: Any]] = []
+    /// Background index progress at read time (mirrors the app's "n/m" counter), when work is in flight.
+    var indexing: (done: Int, total: Int)?
 
     var includesSpeakers: Bool {
         words.contains { $0.speaker != nil }
@@ -130,6 +135,13 @@ struct TimelineTranscript {
             }
         }
         if !skipped.isEmpty { out["skipped"] = skipped }
+        if !pending.isEmpty {
+            out["pending"] = clipId.map { filter in pending.filter { ($0["clipId"] as? String) == filter } } ?? pending
+            out["pendingNote"] = "Transcription in flight for these clips; already-cached clips are returned above. Re-read to collect them."
+        }
+        if let indexing {
+            out["indexing"] = ["done": indexing.done, "total": indexing.total]
+        }
         return out
     }
 
@@ -292,7 +304,10 @@ extension ToolExecutor {
         let context = try await transcriptionContext(args, path: "get_transcript", preference: editor.transcriptionPreference) {
             await editor.captionCloudCreditCost(for: .init(autoDetect: true, provider: .cloud))
         }
-        let transcript = try await timelineTranscript(editor, context: context)
+        // Bracket as an interactive read so background indexing yields the qwen3 actor to it.
+        let transcript = try await BackgroundTranscriptionGate.shared.read {
+            try await timelineTranscript(editor, context: context, awaitClipId: clipFilter)
+        }
         lastTranscriptContext = context
 
         let out = transcript.responsePayload(
@@ -307,16 +322,22 @@ extension ToolExecutor {
         return .ok(json)
     }
 
-    func timelineTranscript(_ editor: EditorViewModel, context: TranscriptionToolContext) async throws -> TimelineTranscript {
+    func timelineTranscript(_ editor: EditorViewModel, context: TranscriptionToolContext, awaitClipId: String? = nil) async throws -> TimelineTranscript {
         if context.provider == .cloud {
             let request = EditorViewModel.CaptionRequest(autoDetect: true, provider: .cloud)
             try await Self.validateCloudTranscriptionAccess(for: request, in: editor)
         }
-        let (words, skipped, models) = try await timelineWords(editor, context: context)
+        let (words, skipped, models, pending) = try await timelineWords(editor, context: context, awaitClipId: awaitClipId)
+        let coordinator = editor.searchIndex
+        let indexing = coordinator.indexingActive
+            ? (done: coordinator.batchCompleted, total: coordinator.batchTotal)
+            : nil
         return TimelineTranscript(
             context: context, words: words, skipped: skipped,
             resolvedModel: Self.resolvedModelLabel(
-                models: models, provider: context.provider, localModelId: editor.resolvedLocalEngine.modelId)
+                models: models, provider: context.provider, localModelId: editor.resolvedLocalEngine.modelId),
+            pending: pending,
+            indexing: indexing
         )
     }
 
@@ -330,7 +351,7 @@ extension ToolExecutor {
         }
     }
 
-    private func timelineWords(_ editor: EditorViewModel, context: TranscriptionToolContext) async throws -> (words: [TimelineWord], skipped: [[String: Any]], models: [String]) {
+    private func timelineWords(_ editor: EditorViewModel, context: TranscriptionToolContext, awaitClipId: String? = nil) async throws -> (words: [TimelineWord], skipped: [[String: Any]], models: [String], pending: [[String: Any]]) {
         let fps = editor.timeline.fps
         let assetsById = Dictionary(editor.mediaAssets.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         var fragments: [TranscriptFragment] = []
@@ -342,14 +363,24 @@ extension ToolExecutor {
             isVideoByURL[asset.url] = isVideo
         }
 
+        // A scoped read only blocks on its own clip's audio; siblings warm the cache but don't hold it up.
+        let awaitURLs: Set<URL>? = awaitClipId.flatMap { id in
+            fragments.first { $0.clipId == id }.map { [$0.url] }
+        }
         let transcripts = await transcriptsByURL(
             for: fragments,
             fps: fps,
             projectId: editor.projectId,
             context: context,
             isVideoByURL: isVideoByURL,
-            localEngine: editor.resolvedLocalEngine
+            localEngine: editor.resolvedLocalEngine,
+            awaitURLs: awaitURLs
         )
+
+        let pendingURLs = Set(transcripts.pending)
+        let pending: [[String: Any]] = fragments
+            .filter { pendingURLs.contains($0.url) }
+            .map { ["clipId": $0.clipId, "mediaRef": $0.clip.mediaRef, "status": "transcribing"] }
 
         let registry = editor.speakerRegistry
         let assignments = editor.speakerAssignments
@@ -377,7 +408,7 @@ extension ToolExecutor {
                 ))
             }
         }
-        return (words, transcripts.skipped, transcripts.results.values.compactMap(\.model))
+        return (words, transcripts.skipped, transcripts.results.values.compactMap(\.model), pending)
     }
 
     /// Per-file speaker labels are file-local; align them project-wide by voice fingerprint.
@@ -428,17 +459,32 @@ extension ToolExecutor {
         return map
     }
 
+    /// Grace window a scoped read waits for uncached transcripts before returning the rest as `pending`.
+    /// Small files usually land inside it; long ones keep transcribing in the background and arrive on
+    /// a later read. Documented constant so the read never blocks indefinitely on the qwen3 actor.
+    nonisolated static let uncachedReadGrace: Duration = .seconds(3)
+
     private func transcriptsByURL(
         for fragments: [TranscriptFragment],
         fps: Int,
         projectId: String?,
         context: TranscriptionToolContext,
         isVideoByURL: [URL: Bool],
-        localEngine: LocalSpeechEngine
-    ) async -> (results: [URL: TranscriptionResult], skipped: [[String: Any]]) {
+        localEngine: LocalSpeechEngine,
+        awaitURLs: Set<URL>?
+    ) async -> (results: [URL: TranscriptionResult], skipped: [[String: Any]], pending: [URL]) {
+        let urls = Set(fragments.map(\.url))
+        // Common local path: return cached clips now, trigger the rest, and surface them as pending
+        // instead of blocking behind them. Forced-locale reads bypass the cache by design, so they
+        // stay on the blocking path below.
+        if context.provider == .local, context.preferredLocale == nil {
+            return await Self.graceBoundedLocalTranscripts(
+                urls: urls, isVideoByURL: isVideoByURL, engine: localEngine, awaitURLs: awaitURLs)
+        }
+
         let rangesByURL = sourceRangesByURL(fragments, fps: fps)
         let outcomes = await withTaskGroup(of: (URL, Result<TranscriptionResult, Error>).self) { group in
-            for url in Set(fragments.map(\.url)) {
+            for url in urls {
                 group.addTask {
                     do {
                         switch context.provider {
@@ -476,7 +522,51 @@ extension ToolExecutor {
             case .failure(let error): skipped.append(["file": url.lastPathComponent, "reason": error.localizedDescription])
             }
         }
-        return (results, skipped)
+        return (results, skipped, [])
+    }
+
+    /// Reads already-cached clips immediately; for uncached ones, fires transcription (the lazy path,
+    /// which also populates the cache for the indexer and later reads) and waits only up to the grace
+    /// window. Whatever hasn't landed by then is returned as `pending` while its transcription runs on.
+    /// `awaitURLs` (a scoped read's target) bounds which uncached urls the grace window waits on:
+    /// all uncached still get transcription fired (warming the cache), but urls outside the scope go
+    /// straight to `pending` so a scoped read of a cached clip never blocks on unrelated siblings.
+    nonisolated static func graceBoundedLocalTranscripts(
+        urls: Set<URL>,
+        isVideoByURL: [URL: Bool],
+        engine: LocalSpeechEngine,
+        awaitURLs: Set<URL>? = nil,
+        grace: Duration = ToolExecutor.uncachedReadGrace
+    ) async -> (results: [URL: TranscriptionResult], skipped: [[String: Any]], pending: [URL]) {
+        var results: [URL: TranscriptionResult] = [:]
+        var uncached: [URL] = []
+        for url in urls {
+            if let cached = TranscriptCache.cachedOnDisk(for: url, engine: engine) {
+                results[url] = cached
+            } else {
+                uncached.append(url)
+            }
+        }
+        guard !uncached.isEmpty else { return (results, [], []) }
+
+        for url in uncached {
+            let isVideo = isVideoByURL[url] ?? true
+            Task.detached(priority: .userInitiated) {
+                _ = try? await TranscriptCache.shared.transcript(for: url, isVideo: isVideo, range: nil, engine: engine)
+            }
+        }
+
+        var toAwait = Set(uncached)
+        if let awaitURLs { toAwait.formIntersection(awaitURLs) }
+        let deadline = ContinuousClock.now + grace
+        while !toAwait.isEmpty, ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(120))
+            for url in toAwait where results[url] == nil {
+                if let cached = TranscriptCache.cachedOnDisk(for: url, engine: engine) { results[url] = cached }
+            }
+            toAwait.subtract(results.keys)
+        }
+        return (results, [], uncached.filter { results[$0] == nil })
     }
 
     private func sourceRangesByURL(_ fragments: [TranscriptFragment], fps: Int) -> [URL: ClosedRange<Double>] {
