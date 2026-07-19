@@ -159,6 +159,7 @@ struct Clip: Codable, Sendable, Equatable, Identifiable {
     var textStyle: TextStyle?
     var textAnimation: TextAnimation?
     var wordTimings: [WordTiming]?
+    var textFillMode: TextFillMode?
 
     // Caption resync provenance (caption text clips only).
     // Transcript-derived text captured at generation/resync; a clip is "dirty" (manually edited)
@@ -189,6 +190,7 @@ struct Clip: Codable, Sendable, Equatable, Identifiable {
         case opacity, transform, crop
         case linkGroupId, captionGroupId, multicamGroupId, textContent, textStyle, textAnimation, wordTimings
         case generatedText, resyncExempt, resyncConflict
+        case textFillMode
         case opacityTrack, positionTrack, scaleTrack, rotationTrack, cropTrack, volumeTrack
         case effects, blendMode
     }
@@ -459,42 +461,43 @@ extension Clip {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.init(
-            id: (try? c.decode(String.self, forKey: .id)) ?? UUID().uuidString,
             mediaRef: try c.decode(String.self, forKey: .mediaRef),
             mediaType: (try? c.decode(ClipType.self, forKey: .mediaType)) ?? .video,
             sourceClipType: (try? c.decode(ClipType.self, forKey: .sourceClipType)) ?? .video,
             startFrame: try c.decode(Int.self, forKey: .startFrame),
-            durationFrames: try c.decode(Int.self, forKey: .durationFrames),
-            trimStartFrame: (try? c.decode(Int.self, forKey: .trimStartFrame)) ?? 0,
-            trimEndFrame: (try? c.decode(Int.self, forKey: .trimEndFrame)) ?? 0,
-            speed: (try? c.decode(Double.self, forKey: .speed)) ?? 1.0,
-            volume: (try? c.decode(Double.self, forKey: .volume)) ?? 1.0,
-            fadeInFrames: (try? c.decode(Int.self, forKey: .fadeInFrames)) ?? 0,
-            fadeOutFrames: (try? c.decode(Int.self, forKey: .fadeOutFrames)) ?? 0,
-            fadeInInterpolation: (try? c.decode(Interpolation.self, forKey: .fadeInInterpolation)) ?? .linear,
-            fadeOutInterpolation: (try? c.decode(Interpolation.self, forKey: .fadeOutInterpolation)) ?? .linear,
-            opacity: (try? c.decode(Double.self, forKey: .opacity)) ?? 1.0,
-            transform: (try? c.decode(Transform.self, forKey: .transform)) ?? Transform(),
-            crop: (try? c.decode(Crop.self, forKey: .crop)) ?? Crop(),
-            linkGroupId: try? c.decode(String.self, forKey: .linkGroupId),
-            captionGroupId: try? c.decode(String.self, forKey: .captionGroupId),
-            multicamGroupId: try? c.decode(String.self, forKey: .multicamGroupId),
-            textContent: try? c.decode(String.self, forKey: .textContent),
-            textStyle: try? c.decode(TextStyle.self, forKey: .textStyle),
-            textAnimation: try? c.decode(TextAnimation.self, forKey: .textAnimation),
-            wordTimings: try? c.decode([WordTiming].self, forKey: .wordTimings),
-            generatedText: try? c.decode(String.self, forKey: .generatedText),
-            resyncExempt: try? c.decode(Bool.self, forKey: .resyncExempt),
-            resyncConflict: try? c.decode(Bool.self, forKey: .resyncConflict),
-            opacityTrack: try? c.decode(KeyframeTrack<Double>.self, forKey: .opacityTrack),
-            positionTrack: try? c.decode(KeyframeTrack<AnimPair>.self, forKey: .positionTrack),
-            scaleTrack: try? c.decode(KeyframeTrack<AnimPair>.self, forKey: .scaleTrack),
-            rotationTrack: try? c.decode(KeyframeTrack<Double>.self, forKey: .rotationTrack),
-            cropTrack: try? c.decode(KeyframeTrack<Crop>.self, forKey: .cropTrack),
-            volumeTrack: try? c.decode(KeyframeTrack<Double>.self, forKey: .volumeTrack),
-            effects: try? c.decode([Effect].self, forKey: .effects),
-            blendMode: try? c.decode(BlendMode.self, forKey: .blendMode)
+            durationFrames: try c.decode(Int.self, forKey: .durationFrames)
         )
+        id = (try? c.decode(String.self, forKey: .id)) ?? UUID().uuidString
+        trimStartFrame = (try? c.decode(Int.self, forKey: .trimStartFrame)) ?? 0
+        trimEndFrame = (try? c.decode(Int.self, forKey: .trimEndFrame)) ?? 0
+        speed = (try? c.decode(Double.self, forKey: .speed)) ?? 1.0
+        volume = (try? c.decode(Double.self, forKey: .volume)) ?? 1.0
+        fadeInFrames = (try? c.decode(Int.self, forKey: .fadeInFrames)) ?? 0
+        fadeOutFrames = (try? c.decode(Int.self, forKey: .fadeOutFrames)) ?? 0
+        fadeInInterpolation = (try? c.decode(Interpolation.self, forKey: .fadeInInterpolation)) ?? .linear
+        fadeOutInterpolation = (try? c.decode(Interpolation.self, forKey: .fadeOutInterpolation)) ?? .linear
+        opacity = (try? c.decode(Double.self, forKey: .opacity)) ?? 1.0
+        transform = (try? c.decode(Transform.self, forKey: .transform)) ?? Transform()
+        crop = (try? c.decode(Crop.self, forKey: .crop)) ?? Crop()
+        linkGroupId = try? c.decode(String.self, forKey: .linkGroupId)
+        captionGroupId = try? c.decode(String.self, forKey: .captionGroupId)
+        multicamGroupId = try? c.decode(String.self, forKey: .multicamGroupId)
+        textContent = try? c.decode(String.self, forKey: .textContent)
+        textStyle = try? c.decode(TextStyle.self, forKey: .textStyle)
+        textAnimation = try? c.decode(TextAnimation.self, forKey: .textAnimation)
+        wordTimings = try? c.decode([WordTiming].self, forKey: .wordTimings)
+        generatedText = try? c.decode(String.self, forKey: .generatedText)
+        resyncExempt = try? c.decode(Bool.self, forKey: .resyncExempt)
+        resyncConflict = try? c.decode(Bool.self, forKey: .resyncConflict)
+        textFillMode = try? c.decode(TextFillMode.self, forKey: .textFillMode)
+        opacityTrack = try? c.decode(KeyframeTrack<Double>.self, forKey: .opacityTrack)
+        positionTrack = try? c.decode(KeyframeTrack<AnimPair>.self, forKey: .positionTrack)
+        scaleTrack = try? c.decode(KeyframeTrack<AnimPair>.self, forKey: .scaleTrack)
+        rotationTrack = try? c.decode(KeyframeTrack<Double>.self, forKey: .rotationTrack)
+        cropTrack = try? c.decode(KeyframeTrack<Crop>.self, forKey: .cropTrack)
+        volumeTrack = try? c.decode(KeyframeTrack<Double>.self, forKey: .volumeTrack)
+        effects = try? c.decode([Effect].self, forKey: .effects)
+        blendMode = try? c.decode(BlendMode.self, forKey: .blendMode)
     }
 }
 

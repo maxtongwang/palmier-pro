@@ -20,6 +20,9 @@ struct TextTab: View {
     private var isFrozen: Bool {
         !captionTargetIds.isEmpty && captionTargetIds.allSatisfy { editor.clipFor(id: $0)?.resyncExempt == true }
     }
+    private var isFootageFill: Bool {
+        sharedClipValue(clips) { $0.textFillMode ?? .color } == .footage
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.zero) {
@@ -31,10 +34,37 @@ struct TextTab: View {
                     fallback: Self.defaults
                 ),
                 defaults: Self.defaults,
+                showsSolidFillControls: !isFootageFill,
                 actions: styleActions,
-                afterAlignment: { positionSection },
+                afterAlignment: {
+                    positionSection
+                    fillModeRow
+                },
                 afterColor: { opacitySlider }
             )
+        }
+    }
+
+    private var fillModeRow: some View {
+        let current = sharedClipValue(clips) { $0.textFillMode ?? .color }
+        return InspectorRow(
+            label: "Fill",
+            onReset: {
+                editor.commitClipProperties(clipIds: clipIds) { $0.textFillMode = nil }
+            }
+        ) {
+            Menu {
+                ForEach(TextFillMode.allCases, id: \.self) { mode in
+                    Button(mode.displayName) {
+                        editor.commitClipProperties(clipIds: clipIds) {
+                            $0.textFillMode = mode == .footage ? .footage : nil
+                        }
+                    }
+                }
+            } label: {
+                EditorMenuValue(text: current?.displayName ?? "—")
+            }
+            .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize().focusable(false)
         }
     }
 

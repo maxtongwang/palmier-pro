@@ -108,17 +108,18 @@ fileprivate struct PartialTextSpec {
     let transform: Transform?
     let animation: TextAnimation?
     let group: CaptionGroupChoice
+    let fillMode: TextFillMode?
 }
 
 extension ToolExecutor {
     private static let addTextsAllowedKeys: Set<String> = Set([
         "trackIndex", "startFrame", "endFrame", "content",
-        "style", "transform", "animation", "highlightColor", "granularity", "captionGroupId", "onOverlap",
+        "style", "transform", "animation", "highlightColor", "granularity", "captionGroupId", "onOverlap", "fillMode",
     ])
 
     private static let updateTextAllowedKeys: Set<String> = Set([
         "clipIds", "captionGroupId", "content", "entries",
-        "style", "transform", "animation", "highlightColor", "granularity", "origin",
+        "style", "transform", "animation", "highlightColor", "granularity", "origin", "fillMode",
     ])
 
     func parseTextStylePatch(_ args: [String: Any], path: String) throws -> ParsedTextStylePatch? {
@@ -351,6 +352,14 @@ extension ToolExecutor {
         return g
     }
 
+    private func parseTextFillMode(_ raw: String?, path: String) throws -> TextFillMode? {
+        guard let raw else { return nil }
+        guard let mode = TextFillMode(rawValue: raw) else {
+            throw ToolError("\(path).fillMode: expected color or footage")
+        }
+        return mode
+    }
+
     private func parseAddTextTransform(
         _ tDict: [String: Any]?,
         content: String, style: TextStyle,
@@ -480,7 +489,8 @@ extension ToolExecutor {
                 style: style,
                 transform: transform,
                 animation: try parseTextAnimation(preset: entry.string("animation"), highlightColor: entry.string("highlightColor"), granularity: entry.string("granularity"), path: path),
-                group: try parseCaptionGroupChoice(editor, entry: entry, path: path)
+                group: try parseCaptionGroupChoice(editor, entry: entry, path: path),
+                fillMode: try parseTextFillMode(entry.string("fillMode"), path: path)
             ))
         }
 
@@ -554,7 +564,8 @@ extension ToolExecutor {
                     style: p.style,
                     transform: p.transform,
                     captionGroupId: captionGroupId,
-                    animation: p.animation
+                    animation: p.animation,
+                    fillMode: p.fillMode
                 )
             }
 
@@ -628,8 +639,9 @@ extension ToolExecutor {
         let animation = try parseTextAnimation(preset: args.string("animation"), highlightColor: args.string("highlightColor"), granularity: args.string("granularity"), path: "update_text")
         let shouldSetAnimation = args.string("animation") != nil
         let highlightOnly = shouldSetAnimation ? nil : try parseColorHex(args.string("highlightColor"), path: "update_text")
+        let fillMode = try parseTextFillMode(args.string("fillMode"), path: "update_text")
 
-        guard hasContent || textStylePatch?.hasAnyField == true || transform != nil || shouldSetAnimation || highlightOnly != nil else {
+        guard hasContent || textStylePatch?.hasAnyField == true || transform != nil || shouldSetAnimation || highlightOnly != nil || fillMode != nil else {
             throw ToolError("update_text needs at least one text property to apply")
         }
 
@@ -709,6 +721,9 @@ extension ToolExecutor {
                     var a = clip.textAnimation ?? TextAnimation()
                     a.highlight = hl
                     clip.textAnimation = a
+                }
+                if let fillMode {
+                    clip.textFillMode = fillMode == .footage ? .footage : nil
                 }
                 if shouldFitToContent {
                     _ = editor.fitTextClipToContentIfNeeded(&clip, canvasW: canvasW, canvasH: canvasH)

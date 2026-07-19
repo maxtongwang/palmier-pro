@@ -19,6 +19,7 @@ enum ToolName: String, CaseIterable, Sendable {
     case inspectMedia = "inspect_media"
     case searchMedia = "search_media"
     case importMedia = "import_media"
+    case captureFrame = "capture_frame"
     case organizeMedia = "organize_media"
 
     // Clips
@@ -248,6 +249,18 @@ enum ToolDefinitions {
                     "folder": ["type": "string", "description": "Optional destination folder path, e.g. 'B-roll/Sunset'. Created if missing. Omit for the project root."],
                 ],
                 required: ["source"]
+            )
+        ),
+        AgentTool(
+            name: .captureFrame,
+            description: "Capture one video frame as a full-resolution PNG media asset. Use timelineFrame to capture the active timeline's final composited image, including transforms, crop, color, effects, text, and captions. Use mediaRef with sourceSeconds to capture an unedited frame directly from a source video instead. Pass the asset's durationSeconds as sourceSeconds to capture its final decodable frame. Exactly one mode is allowed. The returned mediaRef is ready for add_clips, generate_video startFrameMediaRef/endFrameMediaRef, generate_image references, or inspect_media. Every call creates one new undoable media asset.",
+            inputSchema: objectSchema(
+                properties: [
+                    "timelineFrame": ["type": "integer", "description": "Project frame in the active timeline. Use this alone for the composited timeline image."],
+                    "mediaRef": ["type": "string", "description": "Video asset ID from get_media. Use with sourceSeconds for a raw source frame."],
+                    "sourceSeconds": ["type": "number", "description": "Source time in seconds for mediaRef. May equal durationSeconds to select the final decodable frame."],
+                    "name": ["type": "string", "description": "Optional media-library name for the captured PNG."],
+                ]
             )
         ),
         AgentTool(
@@ -716,7 +729,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .addTexts,
-            description: "Adds text clips as timeline layers. Omit trackIndex on every entry to create one new top video track; otherwise set trackIndex on every entry. Transform is normalized text-box center/size; center-only auto-fits, all four fields override the box. Use the nested style object for typography, outline, shadow, and background. Use add_captions for spoken audio captions. Text added onto a track whose existing clips all share one caption group joins that group by default (so group restyle and resync manage it); pass captionGroupId to force a group or \"none\" to opt out.\n\nOverwrite: by default (onOverlap:'clear') each entry CLEARS its [startFrame, endFrame) span on the target track first — any existing clip in that span (text, video, or audio) is trimmed, split, or deleted to make room. On a busy track this silently removes clips. Pass onOverlap:'fail' to instead reject the whole call, listing the colliding clip ids, when any entry's span intersects an existing clip — nothing is mutated. Unknown fields are rejected.",
+            description: "Adds text clips as timeline layers. Omit trackIndex on every entry to create one new top video track; otherwise set trackIndex on every entry. Transform is normalized text-box center/size; center-only auto-fits, all four fields override the box. Use the nested style object for typography, outline, shadow, and background. fillMode 'footage' stencils layers below through the letter shapes. Use add_captions for spoken audio captions. Text added onto a track whose existing clips all share one caption group joins that group by default (so group restyle and resync manage it); pass captionGroupId to force a group or \"none\" to opt out.\n\nOverwrite: by default (onOverlap:'clear') each entry CLEARS its [startFrame, endFrame) span on the target track first — any existing clip in that span (text, video, or audio) is trimmed, split, or deleted to make room. On a busy track this silently removes clips. Pass onOverlap:'fail' to instead reject the whole call, listing the colliding clip ids, when any entry's span intersects an existing clip — nothing is mutated. Unknown fields are rejected.",
             inputSchema: objectSchema(
                 properties: [
                     "entries": [
@@ -739,6 +752,7 @@ enum ToolDefinitions {
                                 "highlightColor": ["type": "string", "description": "Active-word hex."],
                                 "granularity": ["type": "string", "enum": ["word", "char"], "description": "Per-word animation unit, applies only when animation is set. Default word (a CJK word like 重庆 animates as one); char animates each character."],
                                 "captionGroupId": ["type": "string", "description": "Join this caption group, or \"none\" to opt out. Omit to default-join the track's group when its clips all share one; a plain text track stays ungrouped."],
+                                "fillMode": ["type": "string", "enum": ["color", "footage"], "description": "color = solid typography (default). footage = stencil layers below through the letter shapes."],
                             ]),
                             "required": ["startFrame", "endFrame", "content"],
                         ],
@@ -750,7 +764,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .updateText,
-            description: "Updates text clips or a captionGroupId. The nested style object is a partial patch: omitted values stay unchanged. Use it for typography, color, outline, shadow, and background. Content and layout-affecting style changes auto-fit the box unless transform is passed.\n\nEditing a caption clip's content may auto-promote a clean single-term correction into the project glossary, so the same mis-hearing is fixed everywhere and stops recurring (pass origin:'resync' to suppress); the response reports `promoted`, and a note names why the first non-promoted caption edit was left alone.\n\nTo give DIFFERENT clips different content in one undoable call (e.g. applying a whole lint pass), pass `entries: [{clipId, content}]` instead of clipIds+content — the shared style/animation/transform params still apply to every entry's clip, and each clip's timing is re-fit to its own text. entries is mutually exclusive with clipIds, content, and captionGroupId. Unknown fields are rejected.",
+            description: "Updates text clips or a captionGroupId. The nested style object is a partial patch: omitted values stay unchanged. Use it for typography, color, outline, shadow, and background. fillMode 'footage' stencils layers below through the glyphs. Content and layout-affecting style changes auto-fit the box unless transform is passed.\n\nEditing a caption clip's content may auto-promote a clean single-term correction into the project glossary, so the same mis-hearing is fixed everywhere and stops recurring (pass origin:'resync' to suppress); the response reports `promoted`, and a note names why the first non-promoted caption edit was left alone.\n\nTo give DIFFERENT clips different content in one undoable call (e.g. applying a whole lint pass), pass `entries: [{clipId, content}]` instead of clipIds+content — the shared style/animation/transform params still apply to every entry's clip, and each clip's timing is re-fit to its own text. entries is mutually exclusive with clipIds, content, and captionGroupId. Unknown fields are rejected.",
             inputSchema: objectSchema(
                 properties: mergedProperties([
                     "clipIds": [
@@ -782,6 +796,7 @@ enum ToolDefinitions {
                     "animation": ["type": "string", "enum": TextAnimation.Preset.agentValues, "description": "Animation preset; set to animate (off by default), off clears an existing one. Omit to leave the clip's current animation unchanged."],
                     "highlightColor": ["type": "string", "description": "Active-word hex."],
                     "granularity": ["type": "string", "enum": ["word", "char"], "description": "Per-word animation unit, applies only when animation is set. Default word (a CJK word like 重庆 animates as one); char animates each character."],
+                    "fillMode": ["type": "string", "enum": ["color", "footage"], "description": "color = solid typography. footage = stencil layers below through the letter shapes."],
                 ]),
                 required: []
             )

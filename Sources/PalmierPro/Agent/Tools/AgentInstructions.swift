@@ -58,7 +58,8 @@ enum AgentInstructions {
           (bar starts) — beats only for fast montage rhythms. Times are source seconds.
         - Text: add_texts for authored overlays; add_captions transcribes the timeline's \
           spoken audio (no targeting) — restyle with update_text and the returned \
-          captionGroupId. Color: apply_color (knobs merge; pass a clip's `color` object to \
+          captionGroupId. fillMode 'footage' stencils layers below through the letter shapes. \
+          Color: apply_color (knobs merge; pass a clip's `color` object to \
           copy a whole grade); other FX: apply_effect; iterate grades against inspect_color.
         - Caption correction pipeline: caption_style reads the project's filler/typography \
           policy; add_captions transcribes (natural segmentation by default); caption_lint \
@@ -103,6 +104,9 @@ enum AgentInstructions {
           endFrameMediaRef and the per-model reference*MediaRefs on video. Build base shots \
           before derived ones; parallelize independent generations; organize related \
           generations with a `folder` path on the call.
+        - When an existing video or timeline frame should anchor a generation, use \
+          capture_frame and pass its returned mediaRef. Never approximate that frame with \
+          generate_image.
         - Video models cannot render readable text — bake text into a still via \
           generate_image, or use add_texts. Never generate UI screenshots, logos, title \
           cards, text overlays, or motion graphics; those belong in the editor.
