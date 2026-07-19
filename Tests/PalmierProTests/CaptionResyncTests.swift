@@ -1012,3 +1012,39 @@ struct CaptionPromotionParityTests {
         #expect(json?["promoted"] == nil)   // same content → no edit → no second promotion
     }
 }
+
+@MainActor
+@Suite struct CaptionConflictPolicyDefaultTests {
+    // The default policy flags (sets resyncConflict) while keeping the manual text — so A2/A3 surface the
+    // mismatch instead of it being silent, without any change to the "never silently overwrite" contract.
+    @Test func defaultPolicyFlagsAndKeepsManualText() {
+        #expect(CaptionConflictPolicy.default == .flag)
+        let caption = captionClip(id: "cap", start: 0, duration: 90, text: "my fix", generatedText: "one two three")
+        let tl = timeline([Fixtures.videoTrack(clips: [caption])])
+        let src = FakeWordSource(words: [word("one", 0, 45), word("two", 45, 90)])
+
+        let plan = CaptionResyncEngine.plan(
+            timeline: tl, triggerSpans: [0..<90], trigger: "Trim Clip", fps: 30,
+            policy: .default, wordSource: src, chunk: singleChunk)
+
+        #expect(plan.flagged == ["cap"])                            // marks the clip for review
+        #expect(!plan.replacements.contains { $0.clipId == "cap" }) // manual text kept, not overwritten
+        #expect(plan.report.conflicts.first?.manualText == "my fix")
+    }
+
+    // The agent delta is unchanged apart from the flag: flag and preserve emit an identical conflict report
+    // for the same input — flag only additionally sets resyncConflict on the clip.
+    @Test func flagAndPreserveEmitIdenticalReport() {
+        let caption = captionClip(id: "cap", start: 0, duration: 90, text: "my fix", generatedText: "one two three")
+        let tl = timeline([Fixtures.videoTrack(clips: [caption])])
+        func plan(_ policy: CaptionConflictPolicy) -> CaptionResyncPlan {
+            CaptionResyncEngine.plan(
+                timeline: tl, triggerSpans: [0..<90], trigger: "t", fps: 30,
+                policy: policy, wordSource: FakeWordSource(words: [word("one", 0, 45), word("two", 45, 90)]),
+                chunk: singleChunk)
+        }
+        #expect(plan(.flag).report == plan(.preserve).report)   // same report → same agent payload
+        #expect(plan(.flag).flagged == ["cap"])                 // flag's only extra effect
+        #expect(plan(.preserve).flagged.isEmpty)
+    }
+}

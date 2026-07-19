@@ -823,14 +823,14 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .resyncCaptions,
-            description: "Repair path for captions after audio edits: rebuilds caption text/timing from the cached transcript so each caption again shows the words currently under it. Captions normally resync automatically when you trim, ripple-delete, insert, or retime audio — call this only to force a rebuild, fix drift, or preview changes. Scope with captionGroupId (whole group), a startFrame/endFrame window, both (intersection), or neither (every caption group). onManualEdits controls hand-edited captions: preserve (keep, default), overwrite (replace), or flag. Reads the transcript cache only — it never re-transcribes, never edits asset transcripts. Returns the resync report (updated/removed/created/conflicts); dryRun returns the report without changing anything.",
+            description: "Repair path for captions after audio edits: rebuilds caption text/timing from the cached transcript so each caption again shows the words currently under it. Captions normally resync automatically when you trim, ripple-delete, insert, or retime audio — call this only to force a rebuild, fix drift, or preview changes. Scope with captionGroupId (whole group), a startFrame/endFrame window, both (intersection), or neither (every caption group). onManualEdits controls hand-edited captions: preserve (keep silently), overwrite (replace), or flag (keep and mark for review, default). Reads the transcript cache only — it never re-transcribes, never edits asset transcripts. Returns the resync report (updated/removed/created/conflicts); dryRun returns the report without changing anything.",
             inputSchema: objectSchema(
                 properties: [
                     "captionGroupId": ["type": "string", "description": "Resync only this caption group."],
                     "startFrame": ["type": "integer", "description": "Window start (inclusive). Pair with endFrame."],
                     "endFrame": ["type": "integer", "description": "Window end (exclusive). Pair with startFrame."],
                     "dryRun": ["type": "boolean", "description": "Report what would change without mutating. Default false."],
-                    "onManualEdits": ["type": "string", "enum": ["preserve", "overwrite", "flag"], "description": "How to treat hand-edited captions. Defaults to the project's conflict policy (preserve)."],
+                    "onManualEdits": ["type": "string", "enum": ["preserve", "overwrite", "flag"], "description": "How to treat hand-edited captions. Defaults to the project's conflict policy (flag)."],
                     "segmentation": ["type": "string", "enum": CaptionBuilder.Segmentation.allCases.map(\.rawValue), "description": "Line-breaking for rebuilt captions. Default natural: break at sentence/clause punctuation and word boundaries (never mid-word). fixedChars is the legacy recursive width split."],
                 ]
             )

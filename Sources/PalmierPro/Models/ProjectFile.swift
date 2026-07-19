@@ -8,7 +8,7 @@ struct ProjectFile: Codable, Sendable {
     var viewStates: [String: TimelineViewState]?
     var speakers: [SpeakerRegistryEntry]?
     var multicamGroups: [MulticamSource]?
-    /// How caption resync treats manually-edited caption clips. nil decodes as `.preserve`.
+    /// How caption resync treats manually-edited caption clips. nil decodes as `.flag`.
     var captionConflictPolicy: CaptionConflictPolicy?
     /// Cloud/local transcription routing for this project. nil decodes as `.auto`.
     var transcriptionPreference: TranscriptionPreference?

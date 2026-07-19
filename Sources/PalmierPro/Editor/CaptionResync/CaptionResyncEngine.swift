@@ -6,11 +6,13 @@ import Foundation
 
 /// How resync treats a manually-edited (dirty) caption clip whose transcript has since changed.
 enum CaptionConflictPolicy: String, Codable, Sendable, CaseIterable {
-    case preserve   // keep the manual text, record a conflict (default)
+    case preserve   // keep the manual text, record a conflict
     case overwrite  // replace the manual text with the new transcript
-    case flag       // keep the manual text and mark the clip for review
+    case flag       // keep the manual text and mark the clip for review (default)
 
-    static let `default`: CaptionConflictPolicy = .preserve
+    // Default flags rather than silently preserves: manual text is kept either way, but flag also sets
+    // resyncConflict so the timeline badge + inspector surface it. preserve stays selectable for silence.
+    static let `default`: CaptionConflictPolicy = .flag
 }
 
 /// Read-only source of transcript words. The protocol exposes no write API, so an engine holding one
