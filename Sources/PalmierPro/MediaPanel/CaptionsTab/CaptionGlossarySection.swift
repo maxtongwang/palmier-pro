@@ -16,6 +16,7 @@ struct CaptionGlossarySection: View {
     @State private var newCanonical = ""
     @State private var newVariants = ""
     @State private var errorMessage: String?
+    @State private var warningMessage: String?
 
     var body: some View {
         EditorPanelGroup("Glossary", isExpanded: $expanded, headerAccessory: countAccessory) {
@@ -24,6 +25,12 @@ struct CaptionGlossarySection: View {
                 Text(errorMessage)
                     .font(.system(size: AppTheme.FontSize.xs))
                     .foregroundStyle(AppTheme.Status.errorColor)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let warningMessage {
+                Text(warningMessage)
+                    .font(.system(size: AppTheme.FontSize.xs))
+                    .foregroundStyle(AppTheme.Status.warningColor)
                     .fixedSize(horizontal: false, vertical: true)
             }
             if showAddRow { addRow }
@@ -138,11 +145,12 @@ struct CaptionGlossarySection: View {
             .filter { !$0.isEmpty }
         let term = GlossaryTerm(canonical: canonical, variants: variants, provenance: "user", confidence: .declared)
         do {
-            _ = try editor.glossaryAddTerm(term, scope: .project)
+            let result = try editor.glossaryAddTerm(term, scope: .project)
             newCanonical = ""
             newVariants = ""
             showAddRow = false
             errorMessage = nil
+            warningMessage = result.warnings.isEmpty ? nil : result.warnings.joined(separator: " ")
             reload()
         } catch let error {
             errorMessage = error.localizedDescription
@@ -179,8 +187,8 @@ struct CaptionGlossarySection: View {
         }
     }
 
-    /// Only asserted terms below the top scope can be promoted upward (mirrors glossary_promote).
+    /// Any term below the top scope can be promoted upward (matches glossary_promote's default plan).
     private func isPromotable(_ merged: MergedGlossaryTerm) -> Bool {
-        merged.term.confidence == .asserted && promotionTarget(merged.scope) != nil
+        promotionTarget(merged.scope) != nil
     }
 }

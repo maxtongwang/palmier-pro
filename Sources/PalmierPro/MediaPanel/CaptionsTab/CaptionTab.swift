@@ -128,6 +128,7 @@ struct CaptionTab: View {
         .onAppear {
             rememberSelectedClipTargets()
             captionProfile = CaptionStyleStore.resolve(projectPackageURL: editor.projectURL).profile
+            // Snapshot on appear; agent set_project_settings changes reflect on next tab open.
             provider = providerForPreference(editor.transcriptionPreference)
         }
         .onChange(of: editor.selectedClipIds) { _, _ in rememberSelectedClipTargets() }
