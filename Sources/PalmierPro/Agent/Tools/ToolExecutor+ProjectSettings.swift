@@ -7,16 +7,25 @@ fileprivate struct SetProjectSettingsInput: DecodableToolArgs {
     let aspectRatio: String?
     let quality: String?
     let transcriptionPreference: String?
-    static let allowedKeys: Set<String> = ["fps", "width", "height", "aspectRatio", "quality", "transcriptionPreference"]
+    let transcriptionLocalModel: String?
+    static let allowedKeys: Set<String> = ["fps", "width", "height", "aspectRatio", "quality", "transcriptionPreference", "transcriptionLocalModel"]
 }
 
 extension ToolExecutor {
+
+    /// Whether the local-engine override should be pinned to an engine or cleared (follow the global default).
+    enum LocalModelChange {
+        case set(LocalSpeechEngine)
+        case clear
+    }
 
     struct ValidatedProjectSettings {
         fileprivate let input: SetProjectSettingsInput
         let aspectPreset: AspectPreset?
         let qualityPreset: QualityPreset?
         let transcriptionPreference: TranscriptionPreference?
+        /// nil = key absent (untouched); otherwise pin or clear the per-project engine override.
+        let transcriptionLocalModel: LocalModelChange?
     }
 
     @discardableResult
@@ -24,8 +33,9 @@ extension ToolExecutor {
         let input: SetProjectSettingsInput = try decodeToolArgs(args, path: "set_project_settings")
 
         guard input.fps != nil || input.width != nil || input.height != nil
-                || input.aspectRatio != nil || input.quality != nil || input.transcriptionPreference != nil else {
-            throw ToolError("Provide at least one of: fps, width, height, aspectRatio, quality, transcriptionPreference")
+                || input.aspectRatio != nil || input.quality != nil
+                || input.transcriptionPreference != nil || input.transcriptionLocalModel != nil else {
+            throw ToolError("Provide at least one of: fps, width, height, aspectRatio, quality, transcriptionPreference, transcriptionLocalModel")
         }
         if input.aspectRatio != nil && (input.width != nil || input.height != nil) {
             throw ToolError("'aspectRatio' and explicit 'width'/'height' are mutually exclusive")
@@ -64,7 +74,15 @@ extension ToolExecutor {
             }
             return pref
         }
-        return ValidatedProjectSettings(input: input, aspectPreset: aspectPreset, qualityPreset: qualityPreset, transcriptionPreference: transcriptionPreference)
+
+        let transcriptionLocalModel: LocalModelChange? = try input.transcriptionLocalModel.map { raw in
+            if raw == "default" { return .clear }
+            guard let engine = LocalSpeechEngine(rawValue: raw) else {
+                throw ToolError("Unknown transcriptionLocalModel '\(raw)'. Use one of: \(LocalSpeechEngine.allCases.map(\.rawValue).joined(separator: ", ")), default")
+            }
+            return .set(engine)
+        }
+        return ValidatedProjectSettings(input: input, aspectPreset: aspectPreset, qualityPreset: qualityPreset, transcriptionPreference: transcriptionPreference, transcriptionLocalModel: transcriptionLocalModel)
     }
 
     func setProjectSettings(_ editor: EditorViewModel, _ args: [String: Any]) throws -> ToolResult {
@@ -124,10 +142,22 @@ extension ToolExecutor {
             changed.append("transcriptionPreference")
         }
 
+        if let change = settings.transcriptionLocalModel {
+            let newOverride: LocalSpeechEngine? = { if case let .set(engine) = change { return engine } else { return nil } }()
+            if newOverride != editor.transcriptionLocalModel {
+                editor.transcriptionLocalModel = newOverride
+                editor.onProjectCheckpointRequired?()
+                changed.append("transcriptionLocalModel")
+            }
+        }
+
         var payload: [String: Any] = [
             "fps": newFPS,
             "resolution": "\(newWidth)x\(newHeight)",
             "transcriptionPreference": editor.transcriptionPreference.rawValue,
+            "transcriptionLocalModel": editor.transcriptionLocalModel?.rawValue ?? "default",
+            // The on-device model that local transcription will actually run for this project.
+            "resolvedLocalModel": editor.resolvedLocalEngine.modelId,
             "changed": changed,
         ]
         if changed.isEmpty {

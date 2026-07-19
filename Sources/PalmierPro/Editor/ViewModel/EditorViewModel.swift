@@ -431,6 +431,12 @@ final class EditorViewModel {
     /// Cloud/local transcription routing for this project; persisted in project.json.
     var transcriptionPreference: TranscriptionPreference = .default
 
+    /// Per-project override of the on-device engine; nil follows the app-global `LocalSpeechEngine.current`.
+    var transcriptionLocalModel: LocalSpeechEngine?
+
+    /// The on-device engine this project actually transcribes with — the override, else the global default.
+    var resolvedLocalEngine: LocalSpeechEngine { transcriptionLocalModel ?? .current }
+
     /// Models that produced the most recent caption transcription pass, so the tool layer can
     /// surface the resolved model in the add_captions response. Set in generateCaptions' transcribe.
     var lastTranscriptionModels: [String] = []

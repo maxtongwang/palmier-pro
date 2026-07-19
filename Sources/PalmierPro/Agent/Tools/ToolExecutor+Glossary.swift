@@ -267,8 +267,9 @@ extension ToolExecutor {
         var scanned = 0
         var changedSegments = 0
         var examples: [[String: String]] = []
+        let localEngine = editor.resolvedLocalEngine
         for asset in editor.mediaAssets where asset.type == .video || asset.type == .audio {
-            guard let transcript = TranscriptCache.cachedOnDisk(for: asset.url) else { continue }
+            guard let transcript = TranscriptCache.cachedOnDisk(for: asset.url, engine: localEngine) else { continue }
             scanned += 1
             guard !corrector.isEmpty else { continue }
             for segment in transcript.segments {

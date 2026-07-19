@@ -17,22 +17,26 @@ actor TranscriptCache {
     /// so salting every glossary edit here would re-transcribe the whole file for marginal decode gain.
     /// `cachedOnDisk` reads unsalted→salted so this fresh write wins over any stale pre-A3 salted entry,
     /// keeping the salted key only as a fallback for legacy salted-only entries. §4
-    func transcript(for url: URL, isVideo: Bool, range: ClosedRange<Double>?, preferredLocale: Locale? = nil, cacheTag: String? = nil) async throws -> TranscriptionResult {
+    /// `engine` is the caller's resolved on-device engine (a per-project override, else the app-global
+    /// default). It selects the engine that runs AND the cache slot the entry lives in, so switching
+    /// engines/variants re-transcribes into a distinct key with no cross-variant collision. nil = global.
+    func transcript(for url: URL, isVideo: Bool, range: ClosedRange<Double>?, preferredLocale: Locale? = nil, cacheTag: String? = nil, engine: LocalSpeechEngine? = nil) async throws -> TranscriptionResult {
+        let engine = engine ?? .current
         // When a locale is forced, bypass the cache — locale variants must not overwrite the auto-detected entry.
         if let preferredLocale {
             return isVideo
-                ? try await Transcription.transcribeVideoAudio(videoURL: url, preferredLocale: preferredLocale, sourceRange: range)
-                : try await Transcription.transcribe(fileURL: url, preferredLocale: preferredLocale, sourceRange: range)
+                ? try await Transcription.transcribeVideoAudio(videoURL: url, preferredLocale: preferredLocale, sourceRange: range, engine: engine)
+                : try await Transcription.transcribe(fileURL: url, preferredLocale: preferredLocale, sourceRange: range, engine: engine)
         }
         // Cache full transcripts only; windowed calls filter the cached result for consistency.
-        let key = Self.key(for: url, cacheTag: cacheTag)
+        let key = Self.key(for: url, variant: .local(engine: engine), cacheTag: cacheTag)
         let full: TranscriptionResult
         if let key, let cached = cached(key) {
             full = cached
         } else {
             full = isVideo
-                ? try await Transcription.transcribeVideoAudio(videoURL: url)
-                : try await Transcription.transcribe(fileURL: url)
+                ? try await Transcription.transcribeVideoAudio(videoURL: url, engine: engine)
+                : try await Transcription.transcribe(fileURL: url, engine: engine)
             if let key { store(full, key: key) }
         }
         return range.map { Self.filter(full, to: $0) } ?? full
@@ -44,19 +48,21 @@ actor TranscriptCache {
     // entries (written under the old always-salt code) stay readable, and finally the provider-neutral
     // alias that full-file cloud transcripts write under — cloud entries live in .cloud-variant keys the
     // local scheme never reaches, so without the alias cloud projects would never resync.
-    private nonisolated static func readKeys(for url: URL) -> [String] {
+    private nonisolated static func readKeys(for url: URL, engine: LocalSpeechEngine) -> [String] {
         var tags: [String?] = [nil]
         if let fingerprint = TranscriptionBias.fingerprint { tags.append(fingerprint) }
-        return tags.compactMap { key(for: url, cacheTag: $0) } + [key(for: url, variant: .readAlias)].compactMap { $0 }
+        return tags.compactMap { key(for: url, variant: .local(engine: engine), cacheTag: $0) }
+            + [key(for: url, variant: .readAlias)].compactMap { $0 }
     }
 
-    nonisolated static func hasCachedOnDisk(for url: URL) -> Bool {
-        readKeys(for: url).contains { FileManager.default.fileExists(atPath: diskURL($0).path) }
+    nonisolated static func hasCachedOnDisk(for url: URL, engine: LocalSpeechEngine? = nil) -> Bool {
+        readKeys(for: url, engine: engine ?? .current).contains { FileManager.default.fileExists(atPath: diskURL($0).path) }
     }
 
-    /// Disk-only read
-    nonisolated static func cachedOnDisk(for url: URL) -> TranscriptionResult? {
-        for key in readKeys(for: url) {
+    /// Disk-only read. `engine` selects the local cache slot to read (a per-project override, else global),
+    /// keeping cache-only readers (resync, search, glossary apply) symmetric with what `transcript` wrote.
+    nonisolated static func cachedOnDisk(for url: URL, engine: LocalSpeechEngine? = nil) -> TranscriptionResult? {
+        for key in readKeys(for: url, engine: engine ?? .current) {
             if let data = try? Data(contentsOf: diskURL(key)),
                let result = try? JSONDecoder().decode(TranscriptionResult.self, from: data) {
                 return result
@@ -141,7 +147,7 @@ actor TranscriptCache {
         directory.appendingPathComponent("\(key).json")
     }
 
-    static func key(for url: URL, variant: CacheVariant = .local, cacheTag: String? = nil) -> String? {
+    static func key(for url: URL, variant: CacheVariant = .local(engine: .current), cacheTag: String? = nil) -> String? {
         guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
               let size = (attrs[.size] as? NSNumber)?.int64Value,
               let mtime = attrs[.modificationDate] as? Date else { return nil }
@@ -152,16 +158,16 @@ actor TranscriptCache {
     }
 
     enum CacheVariant {
-        case local
+        case local(engine: LocalSpeechEngine)
         case cloud(range: ClosedRange<Double>?, language: String?)
         case readAlias  // provider-neutral "latest full transcript" pointer; the fallback cachedOnDisk reads
 
         var prefix: String? {
             switch self {
-            case .local:
-                // Engine-tagged so switching engines re-transcribes; Apple stays untagged
+            case .local(let engine):
+                // Engine-tagged so switching engines/variants re-transcribes; Apple stays untagged
                 // to keep pre-engine cache entries valid.
-                return LocalSpeechEngine.current.cacheTag
+                return engine.cacheTag
             case .cloud(let range, let language):
                 let lang = language ?? "auto"
                 guard let range else { return "cloud|\(lang)|full" }

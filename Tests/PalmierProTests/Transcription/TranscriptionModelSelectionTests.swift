@@ -220,4 +220,115 @@ struct TranscriptionModelSelectionTests {
         let pref = try #require(properties["transcriptionPreference"])
         #expect(pref["enum"] as? [String] == ["auto", "cloud", "local"])
     }
+
+    // MARK: - Per-project local model override
+
+    /// Only one qwen3-asr build is published (0.6B-int8), so the selectable on-device models are the
+    /// three engines; the override pins this project to one regardless of the app-global default.
+    @MainActor
+    @Test func resolvedLocalEngineHonoursOverrideElseGlobalDefault() {
+        let editor = EditorViewModel()
+        #expect(editor.transcriptionLocalModel == nil)
+        #expect(editor.resolvedLocalEngine == .current) // no override → app-global
+
+        editor.transcriptionLocalModel = .whisper
+        #expect(editor.resolvedLocalEngine == .whisper) // override wins over the global default
+    }
+
+    @MainActor
+    @Test func editorAppliesAndSnapshotsLocalModelOverride() {
+        let editor = EditorViewModel()
+        editor.applyProjectFile(ProjectFile(timelines: [Fixtures.timeline()], transcriptionLocalModel: .whisper))
+        #expect(editor.transcriptionLocalModel == .whisper)
+        #expect(editor.projectFileSnapshot().transcriptionLocalModel == .whisper)
+
+        // Cleared override is omitted from the snapshot so untouched projects follow the global default.
+        editor.transcriptionLocalModel = nil
+        #expect(editor.projectFileSnapshot().transcriptionLocalModel == nil)
+    }
+
+    @Test func projectFileRoundTripsLocalModelOverride() throws {
+        let file = ProjectFile(timelines: [Fixtures.timeline()], transcriptionLocalModel: .apple)
+        let data = try JSONEncoder().encode(file)
+        #expect(try ProjectFile.decode(data).transcriptionLocalModel == .apple)
+    }
+
+    @Test func legacyProjectFileDecodesWithoutLocalModelOverride() throws {
+        let legacy = ProjectFile(timelines: [Fixtures.timeline()]) // nil override
+        let data = try JSONEncoder().encode(legacy)
+        let json = String(decoding: data, as: UTF8.self)
+        #expect(!json.contains("transcriptionLocalModel")) // nil optional omitted
+        #expect(try ProjectFile.decode(data).transcriptionLocalModel == nil)
+    }
+
+    /// Each engine slots to a distinct local cache key, so an override switches variants without any
+    /// chance of a cross-variant collision (extends engineCacheTagsAreDistinct down to the real key).
+    @Test func localCacheKeysAreDistinctPerEngine() {
+        let file = URL(fileURLWithPath: "/System/Library/CoreServices/SystemVersion.plist") // stable existing file
+        let keys = LocalSpeechEngine.allCases.map { TranscriptCache.key(for: file, variant: .local(engine: $0)) }
+        let resolved = keys.compactMap { $0 }
+        #expect(resolved.count == keys.count)          // file exists → every engine resolves a key
+        #expect(Set(resolved).count == resolved.count) // and each engine's key is distinct
+    }
+
+    /// Cache-only readers must locate exactly the slot the override wrote — reading under a different
+    /// engine must miss, or resync/glossary would diverge from what generation produced.
+    @Test func cacheReadWriteSymmetricUnderOverride() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("pp-override-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appendingPathComponent("clip.wav")
+        try Data("audio-bytes".utf8).write(to: file)
+
+        let key = try #require(TranscriptCache.key(for: file, variant: .local(engine: .whisper)))
+        let result = TranscriptionResult(text: "WHISPER", language: "en", words: [], segments: [], model: LocalSpeechEngine.whisper.modelId)
+        try FileManager.default.createDirectory(at: TranscriptCache.directory, withIntermediateDirectories: true)
+        try JSONEncoder().encode(result).write(to: TranscriptCache.diskURL(key))
+        defer { try? FileManager.default.removeItem(at: TranscriptCache.diskURL(key)) }
+
+        #expect(TranscriptCache.hasCachedOnDisk(for: file, engine: .whisper))
+        #expect(TranscriptCache.cachedOnDisk(for: file, engine: .whisper)?.text == "WHISPER")
+        // A different resolved engine reads a different slot → miss, never the wrong variant.
+        #expect(!TranscriptCache.hasCachedOnDisk(for: file, engine: .qwen3))
+        #expect(TranscriptCache.cachedOnDisk(for: file, engine: .qwen3) == nil)
+    }
+
+    /// The empty-model fallback (all-cached-pre-tagging) must report the RESOLVED engine, not the global.
+    @Test func resolvedModelLabelHonoursLocalModelOverride() {
+        #expect(ToolExecutor.resolvedModelLabel(models: [], provider: .local, localModelId: LocalSpeechEngine.whisper.modelId)
+                == "whisper-large-v3_turbo")
+        #expect(ToolExecutor.resolvedModelLabel(models: [], provider: .local, localModelId: LocalSpeechEngine.apple.modelId)
+                == "apple-speech")
+    }
+
+    @MainActor
+    @Test func setProjectSettingsPinsAndClearsLocalModel() async throws {
+        let harness = ToolHarness()
+        let pinned = try await harness.runOK("set_project_settings", args: ["transcriptionLocalModel": "whisper"]) as? [String: Any]
+        #expect(pinned?["transcriptionLocalModel"] as? String == "whisper")
+        #expect(pinned?["resolvedLocalModel"] as? String == "whisper-large-v3_turbo")
+        #expect((pinned?["changed"] as? [String])?.contains("transcriptionLocalModel") == true)
+        #expect(harness.editor.transcriptionLocalModel == .whisper)
+
+        let cleared = try await harness.runOK("set_project_settings", args: ["transcriptionLocalModel": "default"]) as? [String: Any]
+        #expect(cleared?["transcriptionLocalModel"] as? String == "default")
+        #expect((cleared?["changed"] as? [String])?.contains("transcriptionLocalModel") == true)
+        #expect(harness.editor.transcriptionLocalModel == nil)
+    }
+
+    @MainActor
+    @Test func setProjectSettingsRejectsUnknownLocalModel() async {
+        let harness = ToolHarness()
+        let result = await harness.runRaw("set_project_settings", args: ["transcriptionLocalModel": "gpt"])
+        #expect(result.isError)
+        #expect(ToolHarness.textOf(result).contains("transcriptionLocalModel"))
+    }
+
+    @MainActor
+    @Test func setProjectSettingsSchemaExposesLocalModel() throws {
+        let tool = try #require(ToolDefinitions.all.first { $0.name == .setProjectSettings })
+        let properties = try #require(tool.inputSchema["properties"] as? [String: [String: Any]])
+        let model = try #require(properties["transcriptionLocalModel"])
+        #expect(model["enum"] as? [String] == ["qwen3", "whisper", "apple", "default"])
+    }
 }

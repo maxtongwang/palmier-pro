@@ -3,7 +3,7 @@
 // it transcribes code-switched speech natively; a parallel Whisper pass anchors word timing.
 import Foundation
 
-enum LocalSpeechEngine: String, CaseIterable, Identifiable, Sendable {
+enum LocalSpeechEngine: String, CaseIterable, Identifiable, Sendable, Codable {
     case qwen3
     case whisper
     case apple

@@ -26,7 +26,9 @@ final class TimelineTranscriptProvider: CaptionWordSource {
         self.fragments = frags
         self.fps = editor.timeline.fps
         self.corrector = GlossaryStore.load(projectURL: editor.projectURL).corrector()
-        self.read = { TranscriptCache.cachedOnDisk(for: $0) }
+        // Read the project's resolved engine slot so resync locates the same entries generation wrote.
+        let engine = editor.resolvedLocalEngine
+        self.read = { TranscriptCache.cachedOnDisk(for: $0, engine: engine) }
     }
 
     /// Test seam: inject fragments, the glossary corrector, and the raw-transcript reader directly.

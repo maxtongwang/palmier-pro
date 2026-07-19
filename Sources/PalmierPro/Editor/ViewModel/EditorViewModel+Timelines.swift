@@ -25,6 +25,7 @@ extension EditorViewModel {
         multicamGroups = file.multicamGroups ?? []
         captionConflictPolicy = file.captionConflictPolicy ?? .default
         transcriptionPreference = file.transcriptionPreference ?? .default
+        transcriptionLocalModel = file.transcriptionLocalModel
         syncSpeakerColors()
         if !openTimelineIds.contains(activeTimelineId) {
             openTimelineIds.append(activeTimelineId)
@@ -44,7 +45,8 @@ extension EditorViewModel {
             speakers: speakerRegistry.isEmpty ? nil : speakerRegistry,
             multicamGroups: savedMulticamGroups(),
             captionConflictPolicy: captionConflictPolicy == .default ? nil : captionConflictPolicy,
-            transcriptionPreference: transcriptionPreference == .default ? nil : transcriptionPreference
+            transcriptionPreference: transcriptionPreference == .default ? nil : transcriptionPreference,
+            transcriptionLocalModel: transcriptionLocalModel
         )
     }
 

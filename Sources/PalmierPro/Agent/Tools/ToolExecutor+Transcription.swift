@@ -244,10 +244,10 @@ extension ToolExecutor {
 
     /// Collapses the per-file models a transcription pass produced into one label for the response.
     /// Empty (e.g. all-cached pre-tagging results) derives a sensible default from the provider.
-    static func resolvedModelLabel(models: [String], provider: TranscriptionProvider) -> String {
+    static func resolvedModelLabel(models: [String], provider: TranscriptionProvider, localModelId: String = LocalSpeechEngine.current.modelId) -> String {
         let unique = Array(Set(models)).sorted()
         if unique.count == 1 { return unique[0] }
-        if unique.isEmpty { return provider == .cloud ? "cloud" : LocalSpeechEngine.current.modelId }
+        if unique.isEmpty { return provider == .cloud ? "cloud" : localModelId }
         return unique.joined(separator: ", ")
     }
 
@@ -315,7 +315,8 @@ extension ToolExecutor {
         let (words, skipped, models) = try await timelineWords(editor, context: context)
         return TimelineTranscript(
             context: context, words: words, skipped: skipped,
-            resolvedModel: Self.resolvedModelLabel(models: models, provider: context.provider)
+            resolvedModel: Self.resolvedModelLabel(
+                models: models, provider: context.provider, localModelId: editor.resolvedLocalEngine.modelId)
         )
     }
 
@@ -346,7 +347,8 @@ extension ToolExecutor {
             fps: fps,
             projectId: editor.projectId,
             context: context,
-            isVideoByURL: isVideoByURL
+            isVideoByURL: isVideoByURL,
+            localEngine: editor.resolvedLocalEngine
         )
 
         let registry = editor.speakerRegistry
@@ -431,7 +433,8 @@ extension ToolExecutor {
         fps: Int,
         projectId: String?,
         context: TranscriptionToolContext,
-        isVideoByURL: [URL: Bool]
+        isVideoByURL: [URL: Bool],
+        localEngine: LocalSpeechEngine
     ) async -> (results: [URL: TranscriptionResult], skipped: [[String: Any]]) {
         let rangesByURL = sourceRangesByURL(fragments, fps: fps)
         let outcomes = await withTaskGroup(of: (URL, Result<TranscriptionResult, Error>).self) { group in
@@ -444,7 +447,8 @@ extension ToolExecutor {
                                 for: url,
                                 isVideo: isVideoByURL[url] ?? true,
                                 range: nil,
-                                preferredLocale: context.preferredLocale
+                                preferredLocale: context.preferredLocale,
+                                engine: localEngine
                             )))
                         case .cloud:
                             return (url, .success(try await CloudTranscription.transcribe(
@@ -517,13 +521,14 @@ extension ToolExecutor {
     static func transcriptionMeta(
         from transcript: TranscriptionResult,
         mapping: (clip: Clip, fps: Int)? = nil,
-        includeWords: Bool = false
+        includeWords: Bool = false,
+        localModelId: String = LocalSpeechEngine.current.modelId
     ) -> [String: Any] {
         var out: [String: Any] = [
             "timing": mapping == nil ? "sourceSeconds" : "projectFrames",
             // inspect_media transcribes the source asset on-device; it never routes to cloud.
             "transcriptionSource": TranscriptionProvider.local.rawValue,
-            "transcriptionModel": transcript.model ?? LocalSpeechEngine.current.modelId,
+            "transcriptionModel": transcript.model ?? localModelId,
         ]
         if let lang = transcript.language { out["language"] = lang }
 

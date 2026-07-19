@@ -12,6 +12,9 @@ struct ProjectFile: Codable, Sendable {
     var captionConflictPolicy: CaptionConflictPolicy?
     /// Cloud/local transcription routing for this project. nil decodes as `.auto`.
     var transcriptionPreference: TranscriptionPreference?
+    /// Per-project override for which on-device engine backs local transcription. nil follows the
+    /// app-global `LocalSpeechEngine.current`; a value pins this project to that engine regardless.
+    var transcriptionLocalModel: LocalSpeechEngine?
 
     static func decode(_ data: Data) throws -> ProjectFile {
         let decoder = JSONDecoder()

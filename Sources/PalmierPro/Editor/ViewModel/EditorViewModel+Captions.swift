@@ -202,6 +202,7 @@ extension EditorViewModel {
             return TranscribeJob(mediaRef: t.clip.mediaRef, url: url, range: range, isVideo: captionUsesVideoAudioExtraction(for: t.clip))
         }
         let projectId = projectId
+        let localEngine = resolvedLocalEngine
 
         let outcomes = await withTaskGroup(of: (String, Result<TranscriptionResult, Error>).self) { group in
             for job in jobs {
@@ -213,10 +214,10 @@ extension EditorViewModel {
                             if request.censorProfanity || request.locale != nil {
                                 // option variants produce different transcripts — bypass the cache
                                 result = job.isVideo
-                                    ? try await Transcription.transcribeVideoAudio(videoURL: job.url, censorProfanity: request.censorProfanity, preferredLocale: request.locale, sourceRange: job.range)
-                                    : try await Transcription.transcribe(fileURL: job.url, censorProfanity: request.censorProfanity, preferredLocale: request.locale, sourceRange: job.range)
+                                    ? try await Transcription.transcribeVideoAudio(videoURL: job.url, censorProfanity: request.censorProfanity, preferredLocale: request.locale, sourceRange: job.range, engine: localEngine)
+                                    : try await Transcription.transcribe(fileURL: job.url, censorProfanity: request.censorProfanity, preferredLocale: request.locale, sourceRange: job.range, engine: localEngine)
                             } else {
-                                result = try await TranscriptCache.shared.transcript(for: job.url, isVideo: job.isVideo, range: job.range)
+                                result = try await TranscriptCache.shared.transcript(for: job.url, isVideo: job.isVideo, range: job.range, engine: localEngine)
                             }
                         case .cloud:
                             result = try await CloudTranscription.transcribe(

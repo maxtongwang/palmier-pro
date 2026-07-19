@@ -117,10 +117,10 @@ enum TranscriptionError: LocalizedError {
 enum Transcription {
     private static let audioExtractionGate = AsyncSemaphore(value: 2)
 
-    static func transcribeVideoAudio(videoURL: URL, censorProfanity: Bool = false, preferredLocale: Locale? = nil, sourceRange: ClosedRange<Double>? = nil) async throws -> TranscriptionResult {
+    static func transcribeVideoAudio(videoURL: URL, censorProfanity: Bool = false, preferredLocale: Locale? = nil, sourceRange: ClosedRange<Double>? = nil, engine: LocalSpeechEngine? = nil) async throws -> TranscriptionResult {
         let tempAudioURL = try await extractAudioTrack(from: videoURL, range: sourceRange)
         defer { try? FileManager.default.removeItem(at: tempAudioURL) }
-        let result = try await transcribe(fileURL: tempAudioURL, censorProfanity: censorProfanity, preferredLocale: preferredLocale)
+        let result = try await transcribe(fileURL: tempAudioURL, censorProfanity: censorProfanity, preferredLocale: preferredLocale, engine: engine)
         return result.offsetting(by: sourceRange?.lowerBound ?? 0)
     }
 
@@ -149,22 +149,22 @@ enum Transcription {
         return nil
     }
 
-    static func transcribe(fileURL: URL, censorProfanity: Bool = false, preferredLocale: Locale? = nil, sourceRange: ClosedRange<Double>? = nil) async throws -> TranscriptionResult {
+    static func transcribe(fileURL: URL, censorProfanity: Bool = false, preferredLocale: Locale? = nil, sourceRange: ClosedRange<Double>? = nil, engine: LocalSpeechEngine? = nil) async throws -> TranscriptionResult {
         if let sourceRange {
             let tempURL = try await extractAudioTrack(from: fileURL, range: sourceRange)
             defer { try? FileManager.default.removeItem(at: tempURL) }
-            let result = try await transcribe(fileURL: tempURL, censorProfanity: censorProfanity, preferredLocale: preferredLocale)
+            let result = try await transcribe(fileURL: tempURL, censorProfanity: censorProfanity, preferredLocale: preferredLocale, engine: engine)
             return result.offsetting(by: sourceRange.lowerBound)
         }
 
-        // Local engine selection (see LocalSpeechEngine): the on-device engine is read from the
-        // app-global `localSpeechEngine` UserDefaults key — qwen3 (default), whisper, or apple.
-        // qwen3/whisper run first; on failure (e.g. first-run model download with no network) the
-        // code falls through to the Apple SpeechTranscriber path below. The model that actually ran
-        // is stamped onto the returned TranscriptionResult (transcribeWithEngine / decodeResults) so
-        // the tool layer can surface it verbatim rather than re-deriving from the current global.
+        // Local engine selection (see LocalSpeechEngine): the on-device engine is the caller's resolved
+        // choice — a per-project override, else the app-global `localSpeechEngine` UserDefaults key —
+        // qwen3 (default), whisper, or apple. qwen3/whisper run first; on failure (e.g. first-run model
+        // download with no network) the code falls through to the Apple SpeechTranscriber path below.
+        // The model that actually ran is stamped onto the returned TranscriptionResult (transcribeWithEngine
+        // / decodeResults) so the tool layer can surface it verbatim rather than re-deriving from a global.
         // The cloud-vs-local decision happens one layer up, in transcriptionContext.
-        let engine = LocalSpeechEngine.current
+        let engine = engine ?? .current
         if engine != .apple {
             do {
                 return try await transcribeWithEngine(engine, fileURL: fileURL, preferredLocale: preferredLocale)

@@ -167,6 +167,7 @@ extension ToolExecutor {
         // Frames/overview and transcription touch independent subsystems — run them concurrently
         let url = asset.url
         let hasAudio = asset.hasAudio
+        let localEngine = editor.resolvedLocalEngine
         let wantsOverview = args.bool("overview") == true
         let requested = args.int("maxFrames") ?? Self.defaultReadVideoFrames
         let frameCount = max(1, min(requested, Self.readVideoMaxFrames))
@@ -176,7 +177,7 @@ extension ToolExecutor {
         )
         async let transcriptTask: Result<TranscriptionResult, Error>? = {
             guard hasAudio else { return nil }
-            do { return .success(try await TranscriptCache.shared.transcript(for: url, isVideo: true, range: range, preferredLocale: preferredLocale)) }
+            do { return .success(try await TranscriptCache.shared.transcript(for: url, isVideo: true, range: range, preferredLocale: preferredLocale, engine: localEngine)) }
             catch { return .failure(error) }
         }()
 
@@ -194,7 +195,8 @@ extension ToolExecutor {
         case .success(let transcript):
             meta["transcription"] = Self.transcriptionMeta(
                 from: transcript.applyingGlossary(glossaryCorrector(editor)),
-                mapping: mapping, includeWords: args.bool("wordTimestamps") ?? false
+                mapping: mapping, includeWords: args.bool("wordTimestamps") ?? false,
+                localModelId: localEngine.modelId
             )
         case .failure(let error):
             Log.transcription.error("video transcription failed: \(error.localizedDescription)")
@@ -291,9 +293,10 @@ extension ToolExecutor {
 
     private func readAudio(editor: EditorViewModel, asset: MediaAsset, args: [String: Any], mapping: (clip: Clip, fps: Int)? = nil, preferredLocale: Locale? = nil) async throws -> ToolResult {
         let range = try Self.sourceRange(args, duration: asset.duration)
+        let localEngine = editor.resolvedLocalEngine
         let transcript: TranscriptionResult
         do {
-            transcript = try await TranscriptCache.shared.transcript(for: asset.url, isVideo: false, range: range, preferredLocale: preferredLocale)
+            transcript = try await TranscriptCache.shared.transcript(for: asset.url, isVideo: false, range: range, preferredLocale: preferredLocale, engine: localEngine)
         } catch {
             throw ToolError("Transcription failed: \(error.localizedDescription)")
         }
@@ -302,7 +305,8 @@ extension ToolExecutor {
         if let range { meta["timeRange"] = [range.lowerBound, range.upperBound] }
         let transcription = Self.transcriptionMeta(
             from: transcript.applyingGlossary(glossaryCorrector(editor)),
-            mapping: mapping, includeWords: args.bool("wordTimestamps") ?? false
+            mapping: mapping, includeWords: args.bool("wordTimestamps") ?? false,
+            localModelId: localEngine.modelId
         )
         for (k, v) in transcription { meta[k] = v }
         if let mapping { meta["timelineMapping"] = Self.timelineMappingMeta(clip: mapping.clip, fps: mapping.fps) }
