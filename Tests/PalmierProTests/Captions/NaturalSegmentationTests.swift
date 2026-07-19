@@ -34,6 +34,11 @@ struct NaturalSegmentationTests {
         return "。？！，、；….?!,".contains(first)
     }
 
+    /// All phrase text concatenated, spacing removed — the content, independent of where lines break.
+    private func content(_ phrases: [CaptionBuilder.Phrase]) -> String {
+        phrases.map(\.text).joined().replacingOccurrences(of: " ", with: "")
+    }
+
     // MARK: - The three real regressions
 
     @Test func breaksAtSentenceMarkAndKeepsProperNounWhole() {
@@ -110,6 +115,39 @@ struct NaturalSegmentationTests {
         ]
         let phrases = CaptionBuilder.phrases(fromTimedWords: words, fits: { _ in true }, minDuration: 0)
         #expect(phrases.map(\.text) == ["好久没", "我肯定"])
+    }
+
+    @Test func naturalNeverDropsContentAcrossPause() {
+        // Segmentation may differ between modes; content may never. A zero-duration word isolated by a
+        // pause split (evaluator repro: 好久 <pause> 嗯) must survive, not vanish into an empty run.
+        let inputs: [[TranscriptionWord]] = [
+            [word("好", 0.0, 0.3), word("久", 0.3, 0.6), word("嗯", 1.4, 1.4)],
+            [word("好", 0.0, 0.3), word("久", 0.3, 0.6), word("我", 1.1, 1.3), word("肯", 1.3, 1.5)],
+            cjkWords("好久没有开视频了"),
+        ]
+        for words in inputs {
+            let natural = CaptionBuilder.phrases(fromTimedWords: words, fits: { _ in true }, minDuration: 0.7)
+            let fixed = CaptionBuilder.phrases(
+                fromTimedWords: words, fits: { _ in true }, minDuration: 0.7, segmentation: .fixedChars)
+            #expect(content(natural) == content(fixed), "content diverged for \(words.map(\.text).joined())")
+            #expect(!content(natural).isEmpty)
+        }
+    }
+
+    @Test func pauseOverridesPhraseProtection() {
+        // Documented precedence: a real pause inside a protected term splits it (silence mid-term
+        // implies the match was wrong). Pinned so it stays a decision, not an accident.
+        let words = [
+            word("重", 0.0, 0.3), word("庆", 0.3, 0.6),
+            word("西", 1.2, 1.5), word("站", 1.5, 1.8),   // 0.6s pause before 西
+        ]
+        let phrases = CaptionBuilder.phrases(
+            fromTimedWords: words,
+            fits: { _ in true },
+            minDuration: 0,
+            protectedPhrases: ["重庆西站"]
+        )
+        #expect(phrases.map(\.text) == ["重庆", "西站"])
     }
 
     @Test func subThresholdGapDoesNotBreak() {

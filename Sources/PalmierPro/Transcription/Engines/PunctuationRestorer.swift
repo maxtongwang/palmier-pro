@@ -33,6 +33,9 @@ actor SherpaPunctuationRestorer: PunctuationRestoring {
 
     private var punct: OpaquePointer?
     private var loadFailed = false
+    /// In-flight download, so concurrent first callers await one fetch instead of racing into several.
+    /// Bool (present?) is Sendable; the recognizer pointer is built synchronously below, race-free.
+    private var downloadTask: Task<Bool, Never>?
 
     func restore(_ text: String) async -> String {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -46,14 +49,9 @@ actor SherpaPunctuationRestorer: PunctuationRestoring {
     private func loaded() async -> OpaquePointer? {
         if let punct { return punct }
         if loadFailed { return nil }
-        do {
-            try await Self.ensureModel()
-        } catch {
-            Log.transcription.warning(
-                "punct model unavailable, captions stay unpunctuated: \(error.localizedDescription)")
-            loadFailed = true
-            return nil
-        }
+        guard await ensureModelOnce() else { loadFailed = true; return nil }
+        // A concurrent caller may have built the recognizer while this one awaited the download.
+        if let punct { return punct }
         guard let modelPath = Self.modelPath else { loadFailed = true; return nil }
 
         var config = SherpaOnnxOfflinePunctuationConfig()
@@ -68,6 +66,26 @@ actor SherpaPunctuationRestorer: PunctuationRestoring {
         guard let created else { loadFailed = true; return nil }
         punct = created
         return created
+    }
+
+    /// Ensure the model is on disk, deduping concurrent first-callers onto one download.
+    private func ensureModelOnce() async -> Bool {
+        if Self.modelPath != nil { return true }
+        if let downloadTask { return await downloadTask.value }
+        let task = Task<Bool, Never> {
+            do {
+                try await Self.ensureModel()
+                return true
+            } catch {
+                Log.transcription.warning(
+                    "punct model unavailable, captions stay unpunctuated: \(error.localizedDescription)")
+                return false
+            }
+        }
+        downloadTask = task
+        let result = await task.value
+        downloadTask = nil
+        return result
     }
 
     private static func ensureModel() async throws {

@@ -67,7 +67,9 @@ enum CaptionBuilder {
         guard !timed.isEmpty else { return [] }
         // A real speech pause is an unconditional line break: split the word stream at pauses and
         // segment each run alone, so no line ever merges across silence. Pause breaks compose with
-        // punctuation breaks — either triggers. fixedChars keeps its single-segment legacy shape.
+        // punctuation breaks — either triggers. This runs BEFORE phrase protection, so a pause also
+        // overrides it: real silence inside a protected term (重庆<gap>西站) splits it, on the premise
+        // that a genuine pause mid-term means the match was wrong. fixedChars keeps its legacy shape.
         let runs = segmentation == .natural ? splitAtPauses(timed) : [timed]
         let built = runs.flatMap {
             phrasesForRun($0, fits: fits, maxWords: maxWords, minDuration: minDuration,
@@ -85,8 +87,11 @@ enum CaptionBuilder {
         segmentation: Segmentation,
         protectedPhrases: [String]
     ) -> [Phrase] {
+        // A collapsed span (a zero-duration word isolated by a pause split) must still emit — dropping
+        // it would silently lose that word from the captions. enforceMinDuration floors its length.
         guard let first = timed.first, let last = timed.last,
-              let start = first.start, let end = last.end, end > start else { return [] }
+              let start = first.start, let end0 = last.end else { return [] }
+        let end = max(end0, start)
         // Drop empty tokens (a multi-token glossary variant empties the span's tail). Legacy mode joins
         // on spaces; natural mode glues CJK runs so re-tokenisation sees words, not spaced characters.
         let tokens = timed.map(\.text).filter { !$0.isEmpty }
@@ -137,8 +142,9 @@ enum CaptionBuilder {
     private static let asciiHardBreak: Set<Character> = [".", "?", "!", ","]
 
     /// Cut into shortest natural lines: hard breaks then word-token boundaries; content preserved.
-    /// Protected phrases (glossary terms, caption-style phrases) are atomic — a term like 重庆西站 is
-    /// one unbreakable token even under a tight cap, so a line breaks before it rather than through it.
+    /// Protected phrases (glossary terms, caption-style phrases) are atomic WITHIN a run — a term like
+    /// 重庆西站 is one unbreakable token even under a tight cap, so a line breaks before it rather than
+    /// through it. A real speech pause splits the stream upstream of this, so it can override protection.
     private static func naturalLines(
         _ text: String, fits: (String) -> Bool, maxWords: Int?, protectedPhrases: [String] = []
     ) -> [String] {
