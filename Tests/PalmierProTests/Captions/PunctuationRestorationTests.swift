@@ -52,4 +52,87 @@ struct PunctuationRestorationTests {
         let pieces = Qwen3ASREngine.punctuatedPieces(raw: "好久", restored: "，好久")
         #expect(pieces == ["好", "久"])
     }
+
+    /// Reproduces the ct-transformer zh-en failure: it appends a CJK mark after every Latin mark the
+    /// ASR already emitted (`.` → `.。`, `,` → `,，`, `:` → `:，`). The fold must merge, not double.
+    private struct DoublingRestorer: PunctuationRestoring {
+        func restore(_ text: String) async -> String {
+            text
+                .replacingOccurrences(of: ".", with: ".。")
+                .replacingOccurrences(of: ",", with: ",，")
+                .replacingOccurrences(of: ":", with: ":，")
+        }
+    }
+
+    /// Adds CJK terminals to an otherwise unpunctuated CJK stream — the case the feature exists for.
+    private struct CJKRestorer: PunctuationRestoring {
+        func restore(_ text: String) async -> String {
+            text.replacingOccurrences(of: "了", with: "了，").replacingOccurrences(of: "站", with: "站。")
+        }
+    }
+
+    // Real cached English from the 2026-07-15 zh/en vlog report, before doubling was fixed.
+    private static let realEnglish = [
+        "This is sufficient. Oh, okay.",
+        "What I don't like about it: if you want smoked meat, you have to wait.",
+        "Right, so that's the plan.",
+        "Yeah. That works.",
+    ]
+
+    @Test(arguments: realEnglish)
+    func alreadyPunctuatedEnglishIsNeverDoubled(_ raw: String) async {
+        let restored = await DoublingRestorer().restore(raw)
+        let pieces = Qwen3ASREngine.punctuatedPieces(raw: raw, restored: restored)
+        let joined = pieces.joined(separator: " ")
+        // No CJK mark leaks onto Latin text, so no `.。` / `,，` / `:，` pair can exist.
+        #expect(!joined.contains("。"))
+        #expect(!joined.contains("，"))
+        // The ASR's own base text and Latin marks survive unchanged.
+        #expect(pieces == Qwen3ASREngine.punctuatedPieces(raw: raw, restored: raw))
+    }
+
+    @Test func unpunctuatedCJKStreamComesBackPunctuated() async {
+        let raw = "好久没有开视频了那我现在人在重庆西站"
+        let restored = await CJKRestorer().restore(raw)
+        let pieces = Qwen3ASREngine.punctuatedPieces(raw: raw, restored: restored)
+        // Piece count matches the unpunctuated stream, so aligned word timings never shift.
+        #expect(pieces.count == raw.count)
+        let joined = pieces.joined()
+        #expect(joined.contains("了，"))
+        #expect(joined.contains("站。"))
+    }
+
+    @Test func internalLatinPunctuationIsNotReAppended() {
+        // Marks inside a Latin run (apostrophe, abbreviation dots) stay put and are not folded on again.
+        #expect(Qwen3ASREngine.punctuatedPieces(raw: "don't stop", restored: "don't stop.")
+            == ["don't", "stop."])
+        #expect(Qwen3ASREngine.punctuatedPieces(raw: "the U.S. team", restored: "the U.S. team.")
+            == ["the", "U.S.", "team."])
+    }
+}
+
+// E: caption/transcript text assembly never puts spaces inside a CJK run.
+@Suite struct CJKJoinTests {
+    @Test func cjkRunJoinsTight() {
+        #expect(CaptionText.join(["好", "久", "没", "有", "拍", "视", "频", "了"]) == "好久没有拍视频了")
+    }
+
+    @Test func mixedLanguageKeepsLatinSpacing() {
+        #expect(CaptionText.join(["我", "掉", "得", "really", "low", "。"]) == "我掉得 really low。")
+    }
+
+    @Test func punctuationBindsLeftAcrossScripts() {
+        #expect(CaptionText.join(["Nice.", "行", "吗", "？"]) == "Nice. 行吗？")
+    }
+
+    @MainActor
+    @Test func resyncReplaceJoinIsCJKAware() {
+        let words = [
+            WordTiming(text: "好", startFrame: 0, endFrame: 10),
+            WordTiming(text: "久", startFrame: 10, endFrame: 20),
+            WordTiming(text: "really", startFrame: 20, endFrame: 40),
+            WordTiming(text: "low", startFrame: 40, endFrame: 60),
+        ]
+        #expect(CaptionResyncEngine.joinWords(words) == "好久 really low")
+    }
 }
