@@ -210,7 +210,17 @@ actor Qwen3ASREngine {
                 }
             }
 
-            words.append(contentsOf: aligned.words)
+            // Anchors are matched with slack past the chunk boundary; clamp emitted times into the
+            // chunk window so the merged transcript stays monotonic across chunks.
+            words.append(contentsOf: aligned.words.map { word in
+                TranscriptionWord(
+                    text: word.text,
+                    start: word.start.map { min(max($0, chunk.start), chunk.end) },
+                    end: word.end.map { min(max($0, chunk.start), chunk.end) },
+                    speaker: word.speaker,
+                    aligned: word.aligned
+                )
+            })
             segments.append(TranscriptionSegment(
                 // Join the punctuated pieces CJK-aware so segment text reads 好久没有… not 好 久 没 有…
                 // (per-char spacing broke CJK substring search and leaked into displayed transcripts).
@@ -224,13 +234,18 @@ actor Qwen3ASREngine {
         // syllable instead of inheriting a chunk-quantized start (samples are already in hand).
         let refined = OnsetRefiner.refine(words: words, samples: samples, fps: Self.onsetFPS)
 
-        // Defense-in-depth against a partial decode being cached as complete. `expected` prefers the
-        // Whisper pass's speech end over raw energy — a music tail keeps energy high long after speech
-        // ends and would false-positive an energy-only check into the Apple fallback.
-        let energyEnd = EngineAudio.nonSilentEnd(samples: samples)
-        let expectedEnd = timingWords.compactMap(\.end).max().map { min($0 + 2.0, energyEnd) } ?? energyEnd
-        if let lastEnd = segments.map(\.end).max(), expectedEnd > 0, lastEnd < 0.8 * expectedEnd {
-            throw EngineError.incompleteResult(covered: lastEnd, expected: expectedEnd)
+        // Defense-in-depth against a partial decode being cached as complete — on direct evidence,
+        // not tuned thresholds. Whisper heard the same audio independently and decodes speech only:
+        // a run of its words AFTER qwen3's last segment is proof of dropped speech (immune to music
+        // tails). The energy check applies only when Whisper produced nothing to compare against.
+        let lastSegmentEnd = segments.map(\.end).max() ?? 0
+        if !timingWords.isEmpty {
+            let missedSpeech = timingWords.filter { ($0.start ?? 0) > lastSegmentEnd + 2.0 }
+            if missedSpeech.count >= 5, let missedEnd = missedSpeech.compactMap(\.end).max() {
+                throw EngineError.incompleteResult(covered: lastSegmentEnd, expected: missedEnd)
+            }
+        } else if let gap = EngineAudio.coverageShortfall(segments: segments, samples: samples) {
+            throw EngineError.incompleteResult(covered: gap.covered, expected: gap.expected)
         }
 
         // §0 stage split: decide optimizations from this line, not from guesses. `anchorsWait` is the

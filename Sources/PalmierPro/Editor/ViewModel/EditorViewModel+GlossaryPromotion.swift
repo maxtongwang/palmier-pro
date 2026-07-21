@@ -47,9 +47,16 @@ extension EditorViewModel {
             canonical: canonical, variants: variants,
             provenance: existing?.provenance ?? "auto:caption-edit@\(clipId)", confidence: confidence
         )
-        guard let result = try? glossaryWriteUpsert(term, scope: .library),
-              !result.term.variants.isEmpty else { return nil }
-        return (result.term.canonical, result.term.variants)
+        do {
+            let result = try glossaryWriteUpsert(term, scope: .library)
+            guard !result.term.variants.isEmpty else { return nil }
+            return (result.term.canonical, result.term.variants)
+        } catch {
+            // A failed write must not masquerade as "nothing to promote" — the caption edit looked
+            // learned but wasn't persisted.
+            Log.agent.warning("caption-edit promotion write failed clip=\(clipId): \(error.localizedDescription)")
+            return nil
+        }
     }
 
     /// Inspector-origin caption edit: run the shared promotion chain and, on a promotion, resync sibling

@@ -180,7 +180,7 @@ final class SearchIndexCoordinator {
         let needsVisual = (request.type == .video || request.type == .image)
             && VisualIndexer.needsIndex(url: request.url, spec: request.spec)
         let needsTranscript = (request.type == .audio || (request.type == .video && request.hasAudio))
-            && !TranscriptCache.hasCachedOnDisk(for: request.url, engine: request.engine)
+            && !TranscriptCache.hasRequestedEngineEntry(for: request.url, engine: request.engine)
         return PreflightResult(needsVisual: needsVisual, needsTranscript: needsTranscript)
     }
 
