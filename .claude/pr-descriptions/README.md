@@ -1,4 +1,9 @@
-# Upstream PR Descriptions
+# Upstream PR Descriptions (HISTORICAL — series closed)
+
+> 2026-07-21: upstream closed all 18 PRs unreviewed. Their CONTRIBUTING.md: "We don't have the
+> bandwidth to review large unsolicited PRs" — contributions go through GitHub issues instead.
+> This directory stays as design documentation for the fork's features. Do not reopen the series.
+
 
 One file per branch, ready to paste when opening PRs against `palmier-io/palmier-pro`.
 18 branches total. Fix branches have been **folded into their parent feature branches** —

@@ -214,6 +214,16 @@ Rule: **any drop target that spans an area containing other drop targets must us
 - Use an isolated test project, temporary data, and a non-conflicting server port for MCP tests. Never mutate a user's real project as test setup.
 - If an environment prevents an end-to-end test, state the exact blocker and give the user a concrete manual verification plan. Do not substitute a narrower test while claiming end-to-end coverage.
 
+## Fork posture and upstream relations
+
+This repo is a long-lived fork of `palmier-io/palmier-pro` (`origin` = upstream, `fork` = ours). Fork `main` is the source of truth; every feature lives there.
+
+- **Never open large PRs upstream.** Upstream's CONTRIBUTING.md is explicit: "With AI coding, human reviews are the bottleneck. We don't have the bandwidth to review large unsolicited PRs." Our 18-PR caption series was closed unreviewed for this reason.
+- **Contribute via GitHub issues instead**: focused bug reports with repro steps, feature requests, ideas. If a maintainer invites a fix in an issue thread, a tiny surgical PR scoped to that one issue is acceptable — nothing speculative, nothing multi-feature.
+- **Track upstream by merging, not rebasing**: periodically `git fetch origin && git merge origin/main` into fork `main` in a dedicated session with the full suite run before pushing. Expect conflicts concentrated in the caption/transcription files; resolve by adopting upstream's structural refactors and re-threading our extensions through their new seams (single source of truth wins over parallel paths).
+- **Keep our features modular** — additive files, narrow hooks into upstream code — so upstream merges stay cheap.
+- Custom app builds install via `scripts/bundle.sh release` + ditto to /Applications; never accept the stock Sparkle update (it would wipe every fork feature).
+
 ## Recurring review findings — design these out up front
 
 Distilled from external review rounds; check any change touching these areas against this list before writing code.
