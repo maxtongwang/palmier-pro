@@ -41,7 +41,7 @@ enum LocalSpeechEngine: String, CaseIterable, Identifiable, Sendable, Codable {
     var cacheTag: String? {
         switch self {
         case .apple: nil  // preserves pre-existing cache entries
-        case .qwen3: "qw7"  // v7: zh-en punctuation restoration folded onto the word stream
+        case .qwen3: "qw8"  // v8: bias-free decode + script-aware punctuation marks
         case .whisper: "wk2"  // v2: acoustic onset refinement
         }
     }
@@ -53,7 +53,7 @@ enum LocalSpeechEngine: String, CaseIterable, Identifiable, Sendable, Codable {
     var priorCacheTags: [String] {
         switch self {
         case .apple: []
-        case .qwen3: ["qw6", "qw5"]
+        case .qwen3: ["qw7", "qw6", "qw5"]
         case .whisper: ["wk1"]
         }
     }

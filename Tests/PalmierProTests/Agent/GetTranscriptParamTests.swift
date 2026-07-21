@@ -82,6 +82,32 @@ struct GetTranscriptParamTests {
         #expect(segRows?.first?[3] as? Int == 20)  // segment end retains real end frames
     }
 
+    @Test func pendingClipNeverAppearsInClipsAndFlagsIncomplete() async throws {
+        func w(_ i: Int, _ clip: String, _ start: Int) -> TimelineWord {
+            TimelineWord(index: i, clipId: clip, trackIndex: 0, clipStartFrame: 0, clipEndFrame: 300,
+                         text: "word", startFrame: start, endFrame: start + 10, speaker: nil)
+        }
+        // c2 is mid-transcription: even if a partial word stream leaked through, the payload must
+        // keep it out of `clips` — pending and clips are mutually exclusive by construction.
+        var transcript = TimelineTranscript(
+            context: .init(provider: .local, preferredLocale: nil),
+            words: [w(0, "c1", 0), w(1, "c2", 100)],
+            skipped: [],
+            resolvedModel: "qwen3-asr-0.6B-int8"
+        )
+        transcript.pending = [["clipId": "c2", "mediaRef": "m2", "status": "transcribing"]]
+
+        let out = transcript.responsePayload(fps: 30, clipId: nil, startFrame: nil, endFrame: nil, maxWords: 100)
+        let clipIds = (out["clips"] as? [[String: Any]])?.compactMap { $0["clipId"] as? String }
+        #expect(clipIds == ["c1"])
+        #expect(out["complete"] as? Bool == false)
+
+        // A read scoped to the settled clip is complete: no pending, no flag.
+        let scoped = transcript.responsePayload(fps: 30, clipId: "c1", startFrame: nil, endFrame: nil, maxWords: 100)
+        #expect(scoped["pending"] == nil)
+        #expect(scoped["complete"] == nil)
+    }
+
     @Test func sentenceRowsSplitOnCJKAndDoubledTerminals() async throws {
         func w(_ i: Int, _ text: String, _ start: Int, _ end: Int) -> TimelineWord {
             TimelineWord(index: i, clipId: "c1", trackIndex: 0, clipStartFrame: 0, clipEndFrame: 600,

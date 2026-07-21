@@ -42,14 +42,14 @@ struct StaleFallbackReadTests {
     @Test func fallsBackToPriorEngineTagMarkedStale() throws {
         let url = try tempMediaURL()
         defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
-        // Only a qw6 entry exists (the bump to qw7 orphaned it); no current-tag slot.
+        // Only a qw6 entry exists (a later tag bump orphaned it); no current-tag slot.
         let key = try seed("legacy", for: url, variant: .localTag("qw6"))
         defer { try? FileManager.default.removeItem(at: TranscriptCache.diskURL(key)) }
 
         let read = try #require(TranscriptCache.cachedOnDiskAllowingStale(for: url, engine: .qwen3))
         #expect(read.stale == true)
         #expect(read.result.segments.first?.text == "legacy")
-        // The strict current-tag reader still sees nothing, so a full read regenerates under qw7.
+        // The strict current-tag reader still sees nothing, so a full read regenerates under the current tag.
         #expect(TranscriptCache.cachedOnDisk(for: url, engine: .qwen3) == nil)
     }
 

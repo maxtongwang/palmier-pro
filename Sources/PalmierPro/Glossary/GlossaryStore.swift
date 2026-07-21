@@ -143,8 +143,8 @@ struct GlossaryStore: Sendable {
         return digest.map { String(format: "%02x", $0) }.joined().prefix(16).description
     }
 
-    /// Publish this store's hotwords to the transcription engines (TranscriptionBias). Call from
-    /// project-aware paths before transcribing and after any glossary write. §4
+    /// Publish this store's hotword fingerprint so legacy bias-salted cache entries stay readable.
+    /// Engines no longer consume hotwords at decode (see TranscriptionBias). §4
     func applyBias() {
         TranscriptionBias.update(hotwords: hotwordTerms(), fingerprint: biasFingerprint())
     }
