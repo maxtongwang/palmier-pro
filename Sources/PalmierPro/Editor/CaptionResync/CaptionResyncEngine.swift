@@ -148,15 +148,17 @@ enum CaptionResyncEngine {
         // either DELETE it (empty span read as a speech cut) or shrink it (partial words). Preserve it and
         // log why instead — the correction survives a reopen/eviction/unmaterialised-cloud read until the
         // transcript is available again. Dirty clips fall through to policy; cached clips are unaffected.
-        if clean, uncached {
-            plan.report.conflicts.append(.init(
-                clipId: clip.id, manualText: current, newTranscript: current,
-                reason: "transcript not cached — resync skipped; re-open the transcript or run resync_captions after transcription"))
-            return
-        }
-
         // Empty span: auto-remove only clean generated captions; custom/edited ones follow policy.
+        // Cold-cache exception: empty words with an uncached overlapping ref mean "missing read",
+        // not "speech cut" — preserve and log. When cached words exist the resync proceeds: an
+        // unrelated uncached ref (music bed, b-roll) must not freeze caption resync.
         guard !clipWords.isEmpty else {
+            if uncached {
+                plan.report.conflicts.append(.init(
+                    clipId: clip.id, manualText: current, newTranscript: current,
+                    reason: "transcript not cached — resync skipped; re-open the transcript or run resync_captions after transcription"))
+                return
+            }
             if clean { remove(clip, current: current, into: &plan, removed: &removed); return }
             switch policy {
             case .overwrite: remove(clip, current: current, into: &plan, removed: &removed)
@@ -176,8 +178,15 @@ enum CaptionResyncEngine {
         let newTimings = relativeTimings(clipWords, clipStart: effStart, duration: effDuration)
 
         if newText == current {
-            // Text matches, but a clean clip's boundaries may still have drifted (e.g. onset rollback).
-            if let retiming { appendReplacement(clip, text: newText, timings: newTimings, retiming: retiming, into: &plan) }
+            // Text matches, but a clean clip's boundaries may still have drifted (e.g. onset rollback),
+            // or a speed change remapped word timings without changing text — refresh stale karaoke.
+            if let retiming {
+                appendReplacement(clip, text: newText, timings: newTimings, retiming: retiming, into: &plan)
+            } else if let existing = clip.wordTimings, existing != newTimings {
+                plan.replacements.append(.init(
+                    clipId: clip.id, text: newText, wordTimings: newTimings,
+                    generatedText: clip.generatedText ?? newText))
+            }
             if clip.resyncConflict == true { plan.clearedFlags.append(clip.id) }
             return
         }
@@ -276,6 +285,7 @@ enum CaptionResyncEngine {
               let modal = groupClips.first else { return }
 
         let covered = groupClips.filter { !removedIds.contains($0.id) }.map { $0.startFrame..<$0.endFrame }
+            .sorted { $0.lowerBound < $1.lowerBound }
         let uncovered = words.filter { w in
             let mid = (w.startFrame + w.endFrame) / 2
             guard mid >= span.lowerBound, mid < span.upperBound else { return false }
@@ -286,7 +296,21 @@ enum CaptionResyncEngine {
         let maxWords = maxWordsOverride ?? inferredMaxWords(groupClips)
         let style = modal.textStyle ?? TextStyle()
         let animation = modal.textAnimation
-        for group in chunk(uncovered, maxWords) {
+        // Words on opposite sides of a SURVIVING caption must never chunk together — the built
+        // clip would span (and overlap) the preserved island. Split into per-gap regions first.
+        func gapIndex(_ w: WordTiming) -> Int {
+            let mid = (w.startFrame + w.endFrame) / 2
+            return covered.filter { $0.upperBound <= mid }.count
+        }
+        var regions: [[WordTiming]] = []
+        for w in uncovered {
+            if let lastWord = regions.last?.last, gapIndex(lastWord) == gapIndex(w) {
+                regions[regions.count - 1].append(w)
+            } else {
+                regions.append([w])
+            }
+        }
+        for group in regions.flatMap({ chunk($0, maxWords) }) {
             guard let first = group.first, let last = group.last, last.endFrame > first.startFrame else { continue }
             let start = first.startFrame
             let duration = max(1, last.endFrame - start)

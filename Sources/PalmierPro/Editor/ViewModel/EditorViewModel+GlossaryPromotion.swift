@@ -33,12 +33,19 @@ extension EditorViewModel {
     }
 
     /// Upsert an asserted caption-edit correction into the LIBRARY glossary (speaker/domain knowledge,
-    /// reused across projects). Replaces any existing same-canonical entry. nil if validation drops the
-    /// variant or the write fails.
+    /// reused across projects). MERGES with any existing same-canonical entry — several clips can carry
+    /// different mis-hearings of one canonical — and upgrades an inferred (suggestion-only) entry to
+    /// asserted: the user actively typed this correction, so it must auto-apply. nil if validation
+    /// drops the variant or the write fails.
     private func writeAssertedCaptionTerm(canonical: String, variant: String, clipId: String) -> (canonical: String, variants: [String])? {
+        let existing = (try? GlossaryStore.read(scope: .library, projectURL: projectURL))?
+            .terms.first { $0.canonical == canonical }
+        var variants = existing?.variants ?? []
+        if !variants.contains(variant) { variants.append(variant) }
+        let confidence = existing.map { $0.confidence.autoApplies ? $0.confidence : .asserted } ?? .asserted
         let term = GlossaryTerm(
-            canonical: canonical, variants: [variant],
-            provenance: "auto:caption-edit@\(clipId)", confidence: .asserted
+            canonical: canonical, variants: variants,
+            provenance: existing?.provenance ?? "auto:caption-edit@\(clipId)", confidence: confidence
         )
         guard let result = try? glossaryWriteUpsert(term, scope: .library),
               !result.term.variants.isEmpty else { return nil }

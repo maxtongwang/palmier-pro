@@ -69,8 +69,14 @@ actor TranscriptCache {
     private nonisolated static func readKeys(for url: URL, engine: LocalSpeechEngine) -> [String] {
         var tags: [String?] = [nil]
         if let fingerprint = TranscriptionBias.fingerprint { tags.append(fingerprint) }
-        return tags.compactMap { key(for: url, variant: .local(engine: engine), cacheTag: $0) }
-            + [key(for: url, variant: .readAlias)].compactMap { $0 }
+        var keys = tags.compactMap { key(for: url, variant: .local(engine: engine), cacheTag: $0) }
+        // A fallback-produced transcript lives in the Apple slot; without this, read-only consumers
+        // (search, cache checks) would treat the asset as uncached after an engine fallback.
+        if engine != .apple, let fallback = key(for: url, variant: .local(engine: .apple)) {
+            keys.append(fallback)
+        }
+        keys += [key(for: url, variant: .readAlias)].compactMap { $0 }
+        return keys
     }
 
     nonisolated static func hasCachedOnDisk(for url: URL, engine: LocalSpeechEngine? = nil) -> Bool {

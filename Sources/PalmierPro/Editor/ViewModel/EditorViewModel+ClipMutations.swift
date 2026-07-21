@@ -239,11 +239,19 @@ extension EditorViewModel {
                 setClipSpeed(at: loc, newSpeed: newSpeed)
             }
         }
+        // Speed remaps source↔timeline for every word under the clip — captions must follow,
+        // inside the same undo swap (registration happens below).
+        undo.withoutRegistration {
+            resyncCaptionsAfterSwap(before: before, trigger: "Change Speed")
+        }
         let after = timeline
         preDragTimeline = nil
         for id in ids { dragBefore.removeValue(forKey: id) }
         guard before != after else { return }
         registerTimelineSwap(undoState: before, redoState: after, actionName: "Change Speed")
+        // setClipSpeed already kicked an async rebuild from a pre-resync snapshot; notify again so
+        // the player rebuilds from the post-resync timeline instead of racing it.
+        notifyTimelineChanged()
     }
 
     func registerTimelineSwap(undoState: Timeline, redoState: Timeline, actionName: String) {
