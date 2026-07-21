@@ -71,3 +71,24 @@ their parents so upstream reviews one coherent feature:
 | hermetic glossary test roots                                                      | fix/caption-segmentation, feature/glossary-persistence                        |
 | Animate-by row, Model default annotation, glossary Confirm                        | feature/caption-ui-settings                                                   |
 | lazy reindex + priority + audio cache + partial-flag                              | feature/indexing-throughput (new consolidated branch)                         |
+
+## Opened PRs (2026-07-21)
+
+- `multilingual-asr` → https://github.com/palmier-io/palmier-pro/pull/375
+- `feature/glossary` → https://github.com/palmier-io/palmier-pro/pull/376
+- `feature/caption-resync` → https://github.com/palmier-io/palmier-pro/pull/377
+- `feature/caption-style` → https://github.com/palmier-io/palmier-pro/pull/378
+- `fix/caption-segmentation` → https://github.com/palmier-io/palmier-pro/pull/379
+- `fix/caption-timing` → https://github.com/palmier-io/palmier-pro/pull/380
+- `fix/caption-anim-onset` → https://github.com/palmier-io/palmier-pro/pull/381
+- `feature/transcription-model` → https://github.com/palmier-io/palmier-pro/pull/382
+- `feature/caption-lint` → https://github.com/palmier-io/palmier-pro/pull/383
+- `fix/resync-materialisation` → https://github.com/palmier-io/palmier-pro/pull/384
+- `feature/glossary-persistence` → https://github.com/palmier-io/palmier-pro/pull/385
+- `feature/style-lint-persistence` → https://github.com/palmier-io/palmier-pro/pull/386
+- `feature/tool-ergonomics` → https://github.com/palmier-io/palmier-pro/pull/387
+- `fix/punctuated-segmentation` → https://github.com/palmier-io/palmier-pro/pull/388
+- `feature/local-model-selection` → https://github.com/palmier-io/palmier-pro/pull/389
+- `feature/indexing-throughput` → https://github.com/palmier-io/palmier-pro/pull/390
+- `feature/caption-ui-resync` → https://github.com/palmier-io/palmier-pro/pull/391
+- `feature/caption-ui-settings` → https://github.com/palmier-io/palmier-pro/pull/392
