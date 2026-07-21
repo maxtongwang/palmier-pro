@@ -12,7 +12,7 @@ No pipeline stage owns plain ASR word errors: fillers have a policy, known prope
   - **`mode: "flags"`** — runs windows (with neighbor-sentence context) through the app's agent LLM; returns `{clipId, frameRange, original, suggestion, reason, confidence}` candidates. Prompted for word-substitution errors only — never rephrasing or grammar.
   - **`mode: "context"`** — no LLM call: returns the same prepared windows (text, neighbors, exclusions) for the _calling_ agent to judge. Also the automatic degradation when the app LLM is unreachable (unauthenticated / no credits) — the tool never hard-fails.
   - **`autoApplyThreshold`** (absent by default = flag-only): when set, high-confidence fixes apply via `update_text(origin:"user")`, which feeds the existing glossary auto-promotion — a repeated domain term becomes a persistent correction automatically.
-- **Exclusions:** glossary terms (all confidences) and caption-style filler/protected tokens are masked from candidacy — those stages own them. Masking is diff-based: only the _changed_ tokens are tested against exclusions, so a protected noun inside a flagged span doesn't suppress a genuine adjacent fix (e.g. glossary 视频 doesn't block 开视频→拍视频).
+- **Exclusions:** glossary terms (all confidences) and caption-style filler/protected tokens are masked from candidacy — those stages own them. Masking is diff-based: only the _changed_ tokens are tested against exclusions, so a protected noun inside a flagged span doesn't suppress a genuine adjacent fix (e.g. glossary 视频 doesn't block 开照片→拍照片).
 - Deterministic paging via a clipId cursor (safe under overlapping captions); LLM behind a protocol seam — tests inject responses, no network.
 
 ## Testing

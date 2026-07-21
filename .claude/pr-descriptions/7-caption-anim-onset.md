@@ -11,7 +11,7 @@ Two follow-ups from user testing:
 
 ## What's included
 
-- **`TextAnimation.granularity: word | char`** (tolerant Codable; missing = word). Word mode groups CJK characters into NLTokenizer words — 重庆 animates as one unit whose span is the union of its characters' timings; char mode is the explicit opt-in for per-character styles. Animations remain **off by default everywhere** — audited every construction path (generation, UI, tools, resync inheritance) and pinned with regression tests; tool schemas now state captions are static unless `animation` is passed.
+- **`TextAnimation.granularity: word | char`** (tolerant Codable; missing = word). Word mode groups CJK characters into NLTokenizer words — 电影 animates as one unit whose span is the union of its characters' timings; char mode is the explicit opt-in for per-character styles. Animations remain **off by default everywhere** — audited every construction path (generation, UI, tools, resync inheritance) and pinned with regression tests; tool schemas now state captions are static unless `animation` is passed.
 - **Boundary retiming in resync:** provably-generated, unedited caption clips move to their live word span (earlier onset, tightened trailing silence) when it drifts beyond a 2-frame threshold — clamped against neighbors, karaoke timings rebased, changes reported in a new additive `retimed` list. Hand-edited/unknown-provenance clips' boundaries are never touched. Repeat resyncs are a no-op (idempotency pinned).
 - **OnsetRefiner rollback cap 1.5 s → 2.5 s** — a real case had a 1.77 s lag that the old cap clipped; rollback stays bounded by the previous word's end and the energy edge, so the larger cap only helps genuine silence gaps.
 

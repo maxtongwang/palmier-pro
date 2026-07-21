@@ -6,19 +6,19 @@
 
 Two production bugs from a 1000+-caption zh/en project:
 
-1. Caption chunking treated each CJK character as a "word", so `maxWords` sliced lines every ~5 characters — mid-word, mid-name, across sentence ends (`「现在人在重」「庆西站在等」` splits 重庆西站 down the middle).
+1. Caption chunking treated each CJK character as a "word", so `maxWords` sliced lines every ~5 characters — mid-word, mid-name, across sentence ends (`「现在人在重」「庆西站在等」` splits 城南西站 down the middle).
 2. Text created with `add_texts` on a caption track was orphaned — no `captionGroupId` — so group restyling and resync never covered rebuilt lines.
 
 ## What's included
 
 - **`segmentation: "natural"` (new default)** for `add_captions`, `resync_captions`, and the reactive resync path: hard breaks at sentence/clause punctuation (binding left — a line never starts with 。，？！), then only at NLTokenizer word boundaries; never inside a token; one semantic unit per line, preferring shorter lines; `maxWords` means characters/line for CJK, words for Latin. `"fixedChars"` preserves the legacy split (pinned by a byte-exact regression test).
-- Known limitation, documented and test-pinned: a multi-token proper noun (重庆|西站) can split at the token seam under very tight width caps — preventing that needs NER, out of scope. Mid-character splits are impossible.
+- Known limitation, documented and test-pinned: a multi-token proper noun (城南|西站) can split at the token seam under very tight width caps — preventing that needs NER, out of scope. Mid-character splits are impossible.
 - **`add_texts` joins the track's caption group** when the track's text clips all share one; explicit `captionGroupId` param to force a group, `"none"` to opt out.
 - **Provenance-safe deletion:** since custom text can now join groups, the resync engine's empty-span removal is gated symmetrically with replacement — only provably-generated, unedited clips auto-remove; custom or hand-edited captions over silence are preserved with a reasoned conflict entry (policy-controllable).
 
 ## Testing
 
-15 new tests including the exact production regressions (break at 。; 重庆西站 whole at normal widths; token-seam pin at tight caps), group-joining matrix, and the silence-preservation policy matrix. Full suite green.
+15 new tests including the exact production regressions (break at 。; 城南西站 whole at normal widths; token-seam pin at tight caps), group-joining matrix, and the silence-preservation policy matrix. Full suite green.
 
 ## Also included
 
