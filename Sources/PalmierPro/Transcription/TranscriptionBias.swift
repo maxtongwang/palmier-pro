@@ -1,7 +1,8 @@
-// Process-wide decoder-bias bridge from the glossary to the transcription engines.
-// Project-aware call sites publish hotwords before transcribing (GlossaryStore.applyBias());
-// engines read them when (re)building a recognizer, and TranscriptCache salts keys with the
-// fingerprint so a changed hotword set forces a fresh transcription. §4
+// Glossary hotword registry, retained for legacy cache-read fallback only.
+// Engines no longer consume hotwords: prompt biasing on the 0.6B qwen3 model measurably
+// perturbed unrelated recognition, so decode output must be a pure function of audio + model.
+// Corrections apply at read-time materialisation. TranscriptCache still reads the fingerprint
+// to find pre-existing salted entries. §4
 import Foundation
 import Synchronization
 
@@ -12,11 +13,6 @@ enum TranscriptionBias {
     }
 
     private static let state = Mutex(State())
-
-    /// Comma-separated hotword list for sherpa's qwen3_asr.hotwords; nil when no bias is active.
-    static var hotwordsCSV: String? {
-        state.withLock { $0.hotwords.isEmpty ? nil : $0.hotwords.joined(separator: ",") }
-    }
 
     /// Cache-key salt; nil when no bias is active so unbiased cache keys stay byte-identical.
     static var fingerprint: String? {
