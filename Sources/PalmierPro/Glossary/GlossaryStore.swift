@@ -126,7 +126,7 @@ struct GlossaryStore: Sendable {
         warnings + sanitizedAutoApply().warnings
     }
 
-    /// Canonicals that should bias the decoder (auto-apply confidences only). §4
+    /// Auto-apply canonicals — published only for the legacy salted-cache fingerprint. §4
     func hotwordTerms() -> [String] {
         autoApplyTerms.map(\.canonical).sorted()
     }
