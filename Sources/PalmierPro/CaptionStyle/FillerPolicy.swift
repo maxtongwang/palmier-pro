@@ -206,7 +206,9 @@ struct FillerPolicy: Sendable {
         out: inout [FillerAction?]
     ) {
         // Only multi-token entries need span matching; single tokens are handled per-token later.
-        let multiword = phrases.map(Self.parts).filter { $0.count > 1 }
+        // Entries match in BOTH tokenizations, so a multi-character CJK entry (嗯嗯) strips on
+        // blob streams and on flattened per-character streams alike.
+        let multiword = phrases.flatMap(Self.candidateForms).filter { $0.count > 1 }
         guard !multiword.isEmpty else { return }
         var i = 0
         while i < norm.count {

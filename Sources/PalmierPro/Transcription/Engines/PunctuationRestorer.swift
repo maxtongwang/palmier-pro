@@ -23,8 +23,7 @@ actor SherpaPunctuationRestorer: PunctuationRestoring {
     private static let modelArchiveName = "sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12"
     private static let modelArchiveURL = URL(string:
         "https://github.com/k2-fsa/sherpa-onnx/releases/download/punctuation-models/\(modelArchiveName).tar.bz2")!
-    private static let installDir = ModelDownloader.modelsDir
-        .appendingPathComponent(modelArchiveName, isDirectory: true)
+    private static let installDir = SpeechModels.installDir(named: modelArchiveName)
 
     private static var modelPath: String? {
         let path = installDir.appendingPathComponent("model.onnx").path
