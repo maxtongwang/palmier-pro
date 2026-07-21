@@ -75,7 +75,9 @@ actor WhisperKitEngine {
         }
         // refineOnsets marks the authoritative, cacheable transcript (the timing-track call for Qwen3
         // leaves it off); load samples once for both onset refinement and the coverage guard.
-        let samples = refineOnsets ? ((try? EngineAudio.loadSamples(fileURL: fileURL)) ?? []) : []
+        // Fail closed: if the verification reload fails we cannot prove coverage, and returning the
+        // transcript unchecked would let a truncated decode be cached as complete.
+        let samples = refineOnsets ? try EngineAudio.loadSamples(fileURL: fileURL) : []
         let refined = refineOnsets ? OnsetRefiner.refine(words: words, samples: samples, fps: Self.onsetFPS) : words
         if refineOnsets, let gap = EngineAudio.coverageShortfall(segments: segments, samples: samples) {
             throw EngineError.incompleteResult(covered: gap.covered, expected: gap.expected)

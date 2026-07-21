@@ -214,6 +214,25 @@ Rule: **any drop target that spans an area containing other drop targets must us
 - Use an isolated test project, temporary data, and a non-conflicting server port for MCP tests. Never mutate a user's real project as test setup.
 - If an environment prevents an end-to-end test, state the exact blocker and give the user a concrete manual verification plan. Do not substitute a narrower test while claiming end-to-end coverage.
 
+## Recurring review findings — design these out up front
+
+Distilled from external review rounds; check any change touching these areas against this list before writing code.
+
+- A cache with multiple key spaces derives every write key and read key from one function. A fallback read that satisfies content consumers must not also satisfy the scheduler that triggers regeneration — expose separate "content readable" and "needs work" probes.
+- Never fail open: when a guard's own input fails to load (`try?` → empty), the guarded operation must fail, not skip the check.
+- Prefer direct evidence over tuned thresholds in guards. When only a heuristic exists, name the false-positive and false-negative cases in the comment and choose the failure mode that preserves user data.
+- Gate on the smallest span the evidence supports. An entity-wide freeze for a partial-data condition blocks unrelated work; measure coverage of the affected span instead.
+- Any `await` inside an actor admits re-entry: model downloads, installs, and expensive builds must be single-flight (store the in-flight task; joiners await it).
+- MCP tool arguments arrive with Doubles for integers: parse via `args.int`/`safeInt`, reject malformed values loudly, and support one-sided ranges.
+- Partial explicit input overlays defaults field-wise. Never discard a whole default layer because one field was provided.
+- Upserts into user data merge collections (variants) and never downgrade auto-apply confidence; wholesale replace only where the tool contract documents it.
+- Every whitespace tokenization needs a CJK per-character path; every rejoin must be CJK-aware; phrase/span matching must accept both tokenizations of the same phrase.
+- A mutation that changes time mapping (speed, trim, ripple) runs caption resync inside the same undo swap and re-notifies afterward, so async rebuilds can't commit a stale snapshot.
+- Timing attached to text (`wordTimings`) refreshes whenever the mapping changes, even when the text itself is unchanged.
+- Destructive automation requires proof of generation (`generatedText` provenance); unknown provenance follows the user's conflict policy.
+- Any new project sidecar file (e.g. `glossary.json`) must be added to the Save As / export copy list in the same change that introduces it.
+- Search and other page-sized reads must exit early once the page is provably full under the ranking order — never walk the whole library to return one page.
+
 ## Code reviews
 
 - Review for correctness before style. Trace the changed behavior through its callers, shared state, background work, persistence, undo, UI, and Agent surfaces.

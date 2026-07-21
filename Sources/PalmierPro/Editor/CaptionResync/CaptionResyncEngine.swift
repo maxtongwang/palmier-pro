@@ -149,16 +149,23 @@ enum CaptionResyncEngine {
         // log why instead — the correction survives a reopen/eviction/unmaterialised-cloud read until the
         // transcript is available again. Dirty clips fall through to policy; cached clips are unaffected.
         // Empty span: auto-remove only clean generated captions; custom/edited ones follow policy.
-        // Cold-cache exception: empty words with an uncached overlapping ref mean "missing read",
-        // not "speech cut" — preserve and log. When cached words exist the resync proceeds: an
-        // unrelated uncached ref (music bed, b-roll) must not freeze caption resync.
-        guard !clipWords.isEmpty else {
-            if uncached {
+        // Cold-cache gate, span-scoped: with an uncached overlapping ref, resync proceeds only when
+        // the cached words already SPAN the caption (the uncached ref demonstrably contributed
+        // nothing — e.g. a music bed). Empty or partial coverage means the missing read plausibly
+        // owns part of this caption; destructive resolution would delete or shrink it.
+        if uncached {
+            let spanStart = clipWords.map(\.startFrame).min() ?? clip.endFrame
+            let spanEnd = clipWords.map(\.endFrame).max() ?? clip.startFrame
+            let spanCovered = max(0, min(spanEnd, clip.endFrame) - max(spanStart, clip.startFrame))
+            if Double(spanCovered) < 0.8 * Double(max(1, clip.durationFrames)) {
                 plan.report.conflicts.append(.init(
                     clipId: clip.id, manualText: current, newTranscript: current,
                     reason: "transcript not cached — resync skipped; re-open the transcript or run resync_captions after transcription"))
                 return
             }
+        }
+
+        guard !clipWords.isEmpty else {
             if clean { remove(clip, current: current, into: &plan, removed: &removed); return }
             switch policy {
             case .overwrite: remove(clip, current: current, into: &plan, removed: &removed)

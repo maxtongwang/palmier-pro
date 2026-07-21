@@ -83,6 +83,14 @@ actor TranscriptCache {
         readKeys(for: url, engine: engine ?? .current).contains { FileManager.default.fileExists(atPath: diskURL($0).path) }
     }
 
+    /// Requested-slot-only probe for SCHEDULING decisions (the background indexer's "needs
+    /// transcription?"): a fallback entry must satisfy readers but must NOT suppress the retry
+    /// that lets the requested engine heal into its own slot.
+    nonisolated static func hasRequestedEngineEntry(for url: URL, engine: LocalSpeechEngine? = nil) -> Bool {
+        guard let key = key(for: url, variant: .local(engine: engine ?? .current)) else { return false }
+        return FileManager.default.fileExists(atPath: diskURL(key).path)
+    }
+
     /// Disk-only read. `engine` selects the local cache slot to read (a per-project override, else global),
     /// keeping cache-only readers (resync, search, glossary apply) symmetric with what `transcript` wrote.
     nonisolated static func cachedOnDisk(for url: URL, engine: LocalSpeechEngine? = nil) -> TranscriptionResult? {
@@ -204,6 +212,9 @@ actor TranscriptCache {
     static func diskURL(_ key: String) -> URL {
         directory.appendingPathComponent("\(key).json")
     }
+
+    /// File-identity key (path|mtime|size) for memoization by read-side callers.
+    nonisolated static func identityKey(for url: URL) -> String? { key(for: url) }
 
     static func key(for url: URL, variant: CacheVariant = .local(engine: .current), cacheTag: String? = nil) -> String? {
         guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
