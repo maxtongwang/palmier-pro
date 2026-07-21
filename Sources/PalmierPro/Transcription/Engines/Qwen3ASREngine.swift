@@ -71,6 +71,19 @@ actor Qwen3ASREngine {
         return (conv, encoder, decoder, tokenizerDir)
     }
 
+    /// In-flight install, so concurrent first callers await one download instead of racing
+    /// filesystem extraction (the actor is re-entrant at awaits).
+    private var installTask: Task<Void, Error>?
+
+    private func ensureModelOnce() async throws {
+        if Self.isInstalled { return }
+        if let installTask { return try await installTask.value }
+        let task = Task { try await Self.ensureModel() }
+        installTask = task
+        defer { installTask = nil }
+        try await task.value
+    }
+
     static func ensureModel() async throws {
         if isInstalled { return }
         Log.transcription.notice("qwen3-asr model download start (~840MB)", telemetry: "Qwen3 model download started")
@@ -106,7 +119,7 @@ actor Qwen3ASREngine {
     /// in-flight interactive read, so a get_transcript never queues behind a long library asset.
     /// The actor is re-entrant at that suspension, which is what lets the interactive call in.
     func transcribe(fileURL: URL, yieldsToInteractive: Bool = false) async throws -> TranscriptionResult {
-        try await Self.ensureModel()
+        try await ensureModelOnce()
         let recognizer = try loadedRecognizer()
         let started = ContinuousClock.now
 
@@ -211,10 +224,13 @@ actor Qwen3ASREngine {
         // syllable instead of inheriting a chunk-quantized start (samples are already in hand).
         let refined = OnsetRefiner.refine(words: words, samples: samples, fps: Self.onsetFPS)
 
-        // Defense-in-depth against a partial decode (e.g. interrupted reindex) being cached as
-        // complete: reject a transcript whose speech ends grossly short of the audio's non-silent end.
-        if let gap = EngineAudio.coverageShortfall(segments: segments, samples: samples) {
-            throw EngineError.incompleteResult(covered: gap.covered, expected: gap.expected)
+        // Defense-in-depth against a partial decode being cached as complete. `expected` prefers the
+        // Whisper pass's speech end over raw energy — a music tail keeps energy high long after speech
+        // ends and would false-positive an energy-only check into the Apple fallback.
+        let energyEnd = EngineAudio.nonSilentEnd(samples: samples)
+        let expectedEnd = timingWords.compactMap(\.end).max().map { min($0 + 2.0, energyEnd) } ?? energyEnd
+        if let lastEnd = segments.map(\.end).max(), expectedEnd > 0, lastEnd < 0.8 * expectedEnd {
+            throw EngineError.incompleteResult(covered: lastEnd, expected: expectedEnd)
         }
 
         // §0 stage split: decide optimizations from this line, not from guesses. `anchorsWait` is the

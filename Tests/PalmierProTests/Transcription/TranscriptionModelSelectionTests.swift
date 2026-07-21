@@ -321,7 +321,10 @@ struct TranscriptionModelSelectionTests {
         defer { try? FileManager.default.removeItem(at: TranscriptCache.diskURL(appleSlot)) }
 
         #expect(appleSlot == TranscriptCache.key(for: file, variant: .local(engine: .apple)))
-        #expect(TranscriptCache.cachedOnDisk(for: file, engine: .qwen3) == nil) // requested slot stays empty → retryable
+        // The requested SLOT stays empty (retryable by transcript()), but read-only consumers see the
+        // fallback entry via the apple-slot fallback read — the asset must not look uncached to search.
+        let fallbackRead = TranscriptCache.cachedOnDisk(for: file, engine: .qwen3)
+        #expect(fallbackRead?.model == LocalSpeechEngine.apple.modelId)
         #expect(TranscriptCache.cachedOnDisk(for: file, engine: .apple)?.text == "APPLE")
 
         // A later successful qwen3 run fills the qwen3 slot and wins for qwen3 reads (true model reported).

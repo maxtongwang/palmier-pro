@@ -176,8 +176,10 @@ enum Transcription {
         // The model that actually ran is stamped onto the returned TranscriptionResult (transcribeWithEngine
         // / decodeResults) so the tool layer can surface it verbatim rather than re-deriving from a global.
         // The cloud-vs-local decision happens one layer up, in transcriptionContext.
+        // Profanity etiquette replacements exist only in Apple Speech, so a censoring request
+        // routes there rather than being silently ignored by the local engines.
         let engine = engine ?? .current
-        if engine != .apple {
+        if engine != .apple, !censorProfanity {
             do {
                 return try await transcribeWithEngine(engine, fileURL: fileURL, preferredLocale: preferredLocale, background: background)
             } catch is CancellationError {
