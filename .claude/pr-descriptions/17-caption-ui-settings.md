@@ -16,4 +16,10 @@ Caption behavior added over the last cycles (segmentation, animation granularity
 
 Resolver precedence matrix, reconciler mapping, helper/tool parity (add sanitizes + warns, remove triggers §5.2, promote moves scope), persistence round-trips. Full suite green.
 
+## Also included
+
+- **Animate-by row is always visible** under the Animation section (dimmed when the preset has no granularity), instead of appearing and disappearing — discoverability over modality.
+- **Model menu never shows a phantom "Default" choice**: it lists the concrete engines and annotates the inherited one with "— Default", so the effective model is always explicit.
+- **One-click Confirm on inferred glossary suggestions**: the glossary review list upgrades an inferred term to declared (provenance "user") in place, with an amber chip marking suggestion-only entries.
+
 🤖 Generated with [Claude Code](https://claude.com/claude-code)

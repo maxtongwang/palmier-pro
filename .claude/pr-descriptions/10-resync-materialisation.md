@@ -18,4 +18,8 @@ Four audit findings, one critical: caption _generation_ read the glossary-materi
 
 Materialisation pins (never-revert, propagation, removal round-trip), alias/read-order regressions, fade-in/click onset scenarios, uncached-preservation matrix. Full suite green.
 
+## Also included
+
+- **A cold cache never deletes captions**: resync over a source with no cached transcript previously hit the clean-clip empty-span auto-remove and silently deleted the caption — an empty word set is a missing read, not a speech cut. Destructive resolution of a clean clip is now gated on cache coverage; uncached refs preserve the clip and surface a conflict ("transcript not cached — resync skipped"). `update_text`'s promotion path surfaces the same report (`captionResync.skippedNoTranscript`).
+
 🤖 Generated with [Claude Code](https://claude.com/claude-code)

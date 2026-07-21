@@ -16,4 +16,12 @@ The local qwen3-asr port emits a pure character stream with zero punctuation (ve
 
 Punctuation fold/passthrough/altered-fallback, the real opening-line acceptance case (「好久没有拍视频了。那我现在人在重庆西站在等着」 → whole-phrase lines), pause-break and content-preservation pins, protection matrices. Full suite green.
 
+## Also included
+
+- **Marks merge, never double**: the ct-transformer appends a CJK mark after every Latin mark the ASR already emitted (`.` → `.。`); the fold keeps the existing mark instead, so no `.。`/`,，` pair can render. Dense CJK that previously failed base-character matching now punctuates (the fold compares base characters, tolerant of restorer re-spacing).
+- **Script-aware marks**: the zh-en restorer emits fullwidth marks regardless of script; a mark folded after a Latin base character lands as its ASCII form (`。`→`.`, `？`→`?`), so fullwidth punctuation never appears inside an English span.
+- **CJK-tight joining**: caption and transcript text assembles through one CJK-aware `join` — no spaces inside CJK runs, normal spacing around Latin, marks bind left. (Per-char spacing previously broke CJK substring search and leaked into displayed transcripts.)
+- **Punctuation is a break signal, not caption content**: natural segmentation breaks at marks and pauses first, with the profile's `typography.maxWords` as an upper bound only — then a display policy (`typography.punctuation`: `stripCJK` default / `strip` / `keep`) strips CJK marks from the rendered line while keeping Latin ones. Applied identically at generation, resync REPLACE, and creations, so clean-comparison never churns. `resync_captions` gains an explicit `maxWords`; profile `maxWords` now reaches the resync engine.
+- **Decode never consumes glossary hotwords** (same rationale as the segmentation PR): recognition is a pure function of audio + model.
+
 🤖 Generated with [Claude Code](https://claude.com/claude-code)

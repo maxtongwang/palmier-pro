@@ -20,4 +20,9 @@ Two production bugs from a 1000+-caption zh/en project:
 
 15 new tests including the exact production regressions (break at 。; 重庆西站 whole at normal widths; token-seam pin at tight caps), group-joining matrix, and the silence-preservation policy matrix. Full suite green.
 
+## Also included
+
+- **No decoder biasing — glossary corrections are read-time only.** An earlier iteration fed glossary terms into the qwen3 decoder as hotwords; prompt-conditioning the 0.6B model measurably perturbed recognition of unrelated audio (verified on identical audio with/without hotwords). This PR ships with recognition as a pure function of audio + model: no hotword injection, no bias-salted cache keys. Corrections apply when transcripts are read, never at decode.
+- **Hermetic glossary tests**: a `@TaskLocal` root override pins the library/global glossary scopes to an isolated directory so the suite never reads a developer's real `~/Documents` glossary.
+
 🤖 Generated with [Claude Code](https://claude.com/claude-code)

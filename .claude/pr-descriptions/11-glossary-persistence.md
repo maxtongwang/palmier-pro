@@ -17,4 +17,8 @@ Corrections learned in one project were invisible to the next: auto-promotions s
 
 Scope/promotion matrix, duplication preservation, widening truth table (promotes: 开视频→拍视频, 师父→狮父; rejects: 在来→再来, 他说→她说, 的/地/了 grammar edits), mixed-script boundary cases, determinism. Full suite green, `$HOME` verified untouched.
 
+## Also included
+
+- Tool-executor suites run against an isolated glossary root (`.isolatedGlossaryRoot`), so tests can never read or write a developer's real library glossary.
+
 🤖 Generated with [Claude Code](https://claude.com/claude-code)

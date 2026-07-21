@@ -19,4 +19,8 @@ Adds two on-device transcription engines beside Apple Speech and makes Qwen3-ASR
 
 Unit tests for the engine plumbing and alignment; full suite green. Verified end-to-end on 40-minute zh/en code-switched footage.
 
+## Also included
+
+- **Interrupted decodes are never cached as complete**: both engines reject a transcript whose speech ends grossly short of the audio's last non-silent 50 ms window (`EngineAudio.coverageShortfall`), and cancellation checks between chunks make interruption cooperative. A cancelled or crashed index pass can no longer persist a partial transcript that later reads would trust.
+
 🤖 Generated with [Claude Code](https://claude.com/claude-code)

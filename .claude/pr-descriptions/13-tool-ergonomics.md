@@ -19,4 +19,8 @@ Workflow-audit fixes for the traps and friction an agent hits driving the captio
 
 Overlap matrices (existing-clip, intra-call, new-track), batch entries with per-entry promotion + undo atomicity, reason-note coverage, punctuation-run timing preservation. Full suite green.
 
+## Also included
+
+- **`granularity:'segments'` splits CJK sentences**: sentence rows now break on CJK terminals (。！？) and on terminal marks followed by trailing quotes/brackets, using punctuation-class matching — previously an all-CJK transcript collapsed into one giant row.
+
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
