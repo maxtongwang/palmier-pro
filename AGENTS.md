@@ -221,6 +221,7 @@ This repo is a long-lived fork of `palmier-io/palmier-pro` (`origin` = upstream,
 - **Never open large PRs upstream.** Upstream's CONTRIBUTING.md is explicit: "With AI coding, human reviews are the bottleneck. We don't have the bandwidth to review large unsolicited PRs." Our 18-PR caption series was closed unreviewed for this reason.
 - **Contribute via GitHub issues instead**: focused bug reports with repro steps, feature requests, ideas. If a maintainer invites a fix in an issue thread, a tiny surgical PR scoped to that one issue is acceptable — nothing speculative, nothing multi-feature.
 - **Track upstream by merging, not rebasing**: periodically `git fetch origin && git merge origin/main` into fork `main` in a dedicated session with the full suite run before pushing. Expect conflicts concentrated in the caption/transcription files; resolve by adopting upstream's structural refactors and re-threading our extensions through their new seams (single source of truth wins over parallel paths).
+- **`FORK_FEATURES.md` is the feature manifest**: every fork-touched file mapped to its owning feature. Update it when adding a feature or absorbing an upstream refactor; use it to triage merge conflicts feature-by-feature.
 - **Keep our features modular** — additive files, narrow hooks into upstream code — so upstream merges stay cheap.
 - Custom app builds install via `scripts/bundle.sh release` + ditto to /Applications; never accept the stock Sparkle update (it would wipe every fork feature).
 
