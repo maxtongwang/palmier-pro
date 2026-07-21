@@ -617,6 +617,7 @@ struct CaptionTab: View {
             maxWords: resolvedMaxWords.value,
             provider: provider,
             animation: TextAnimation(preset: animationPreset, highlight: animationHighlight, granularity: animationGranularity),
+            punctuation: CaptionText.PunctuationPolicy(profileValue: captionProfile.typography.punctuation),
             segmentation: resolvedSegmentation.value
         )
         Task {
