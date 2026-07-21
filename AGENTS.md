@@ -214,6 +214,21 @@ Rule: **any drop target that spans an area containing other drop targets must us
 - Use an isolated test project, temporary data, and a non-conflicting server port for MCP tests. Never mutate a user's real project as test setup.
 - If an environment prevents an end-to-end test, state the exact blocker and give the user a concrete manual verification plan. Do not substitute a narrower test while claiming end-to-end coverage.
 
+## Development pipeline (fork)
+
+Every change follows this pipeline. It is built on upstream's own CONTRIBUTING.md (prereqs: macOS 26+, Xcode 16+, Swift 6.2; commands: `swift build`, `swift run`, `./scripts/dev.sh`, `swift test`; license: GPLv3) with the fork's additions layered on.
+
+1. **Slice** — identify the owning feature in `FORK_FEATURES.md` before writing code. New capability → add a manifest entry first (purpose, planned files, hooks). Cross-feature edits are a design smell; prefer extending one slice.
+2. **Branch** — work in a fresh worktree branch off `main`; never directly on `main`.
+3. **Implement** — modular per the manifest: new capability in new files, upstream hooks narrow. Check the change against "Recurring review findings" BEFORE writing, not after.
+4. **Gate** — `./scripts/check.sh` (wraps upstream's documented `swift build` + `swift test`, and adds the `--traits BundledSpeech` build when the transcription surface is touched). Nothing merges red.
+5. **Run** — verify live behavior with upstream's `./scripts/dev.sh` (bundled debug app + OSLog streaming); UI changes additionally get a manual test plan for the user.
+6. **Land** — merge to `main`, then `scripts/bundle.sh release` + ditto to /Applications (the stock Sparkle update is never accepted).
+7. **Record** — update `FORK_FEATURES.md` (files/hooks) and the feature's design doc in `.claude/pr-descriptions/` when behavior changed.
+8. **Upstream (optional, issues only)** — if a slice or bug is worth sharing, draft ONE GitHub issue from `.claude/upstream-issue-template.md`. Never a PR unless a maintainer asks in the issue thread; then a surgical patch scoped to exactly that thread.
+
+Upstream sync is its own pipeline run, on demand: `git fetch origin && git merge origin/main` in a dedicated worktree, conflicts triaged via the manifest's "Shared hook surfaces" table (adopt upstream's structural refactors, re-thread our extensions through their new seams), then steps 4-7.
+
 ## Fork posture and upstream relations
 
 This repo is a long-lived fork of `palmier-io/palmier-pro` (`origin` = upstream, `fork` = ours). Fork `main` is the source of truth; every feature lives there.
