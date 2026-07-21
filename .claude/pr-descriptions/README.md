@@ -45,6 +45,12 @@ infer them. Do not open a PR before everything it depends on has merged.
   bias-salted cache keys). Later-wave snapshots may still contain remnants of the
   removed bias plumbing from the fork's history — strip any such remnant at rebase
   time; nothing may reference `TranscriptionBias` in an upstream PR.
+- **Nothing project-specific goes upstream.** The sherpa/onnxruntime binary is
+  git-excluded and assembled from official release artifacts by `scripts/fetch-sherpa.sh`
+  (checksummed) — that script IS part of the multilingual-asr PR and is the supported
+  path. The fork's `.claude/` directory (harness files, these descriptions) is tracked
+  on fork `main` only; every PR branch has been stripped of it, and any rebase must keep
+  it out of the PR diff.
 - **Cache tags**: upstream ships qwen3 at tag `qw7`. The fork's `qw8` bump existed only
   to invalidate locally-biased cache entries; upstream never had biased entries, so do
   NOT carry the bump into a PR.
