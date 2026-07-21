@@ -31,7 +31,9 @@ struct CaptionResyncPlan {
         var clipId: String
         var text: String
         var wordTimings: [WordTiming]
-        var generatedText: String
+        /// nil leaves the clip's provenance untouched (timing-only refresh); non-nil records the
+        /// transcript this replacement was generated from.
+        var generatedText: String?
         // Set only when a clean clip's boundaries were retimed to its word span; nil leaves them.
         var startFrame: Int?
         var durationFrames: Int?
@@ -132,6 +134,24 @@ enum CaptionResyncEngine {
         return plan
     }
 
+    /// Total duration of spans after merging gaps of <=12 frames (a natural speech pause).
+    static func mergedSpanDuration(_ spans: [(Int, Int)]) -> Int {
+        var covered = 0
+        var runStart: Int? = nil
+        var runEnd = 0
+        for (s, e) in spans.sorted(by: { $0.0 < $1.0 }) where e > s {
+            if runStart != nil, s <= runEnd + 12 {
+                runEnd = max(runEnd, e)
+            } else {
+                if let rs = runStart { covered += runEnd - rs }
+                runStart = s
+                runEnd = e
+            }
+        }
+        if let rs = runStart { covered += runEnd - rs }
+        return covered
+    }
+
     // MARK: - Per-clip REPLACE / REMOVE / conflict
 
     private static func resolveClip(
@@ -154,29 +174,17 @@ enum CaptionResyncEngine {
         // nothing — e.g. a music bed). Empty or partial coverage means the missing read plausibly
         // owns part of this caption; destructive resolution would delete or shrink it.
         if uncached {
-            // Denominator: the clip's SPEECH extent — existing karaoke timings bound it so display
-            // padding (minDisplayDuration) can't inflate the requirement. Numerator: cached word
-            // spans with natural pauses (<=12 frames) merged, so genuine holes count as missing but
-            // ordinary inter-word gaps don't.
-            let speechExtent = clip.wordTimings.flatMap { $0.map(\.endFrame).max() } ?? clip.durationFrames
-            let denominator = max(1, min(clip.durationFrames, speechExtent))
-            var covered = 0
-            var runStart: Int? = nil
-            var runEnd = 0
-            for w in clipWords.sorted(by: { $0.startFrame < $1.startFrame }) {
-                let s = max(w.startFrame, clip.startFrame) - clip.startFrame
-                let e = min(w.endFrame, clip.endFrame) - clip.startFrame
-                guard e > s else { continue }
-                if runStart != nil, s <= runEnd + 12 {
-                    runEnd = max(runEnd, e)
-                } else {
-                    if let rs = runStart { covered += runEnd - rs }
-                    runStart = s
-                    runEnd = e
-                }
-            }
-            if let rs = runStart { covered += runEnd - rs }
-            if Double(covered) < 0.8 * Double(denominator) {
+            // Apples-to-apples coverage: cached words' pause-merged span duration vs the SAME
+            // measure over the clip's existing karaoke timings (falling back to the clip span when
+            // none exist). Computing both sides identically cancels leading silence, display
+            // padding, and natural pauses — only genuinely missing speech lowers the ratio.
+            let denominator = clip.wordTimings.map { Self.mergedSpanDuration($0.map { ($0.startFrame, $0.endFrame) }) }
+                ?? max(1, clip.durationFrames)
+            let covered = Self.mergedSpanDuration(clipWords.map {
+                (max($0.startFrame, clip.startFrame) - clip.startFrame,
+                 min($0.endFrame, clip.endFrame) - clip.startFrame)
+            })
+            if Double(covered) < 0.8 * Double(max(1, denominator)) {
                 plan.report.conflicts.append(.init(
                     clipId: clip.id, manualText: current, newTranscript: current,
                     reason: "transcript not cached — resync skipped; re-open the transcript or run resync_captions after transcription"))
@@ -208,12 +216,12 @@ enum CaptionResyncEngine {
             // or a speed change remapped word timings without changing text — refresh stale karaoke.
             if let retiming {
                 appendReplacement(clip, text: newText, timings: newTimings, retiming: retiming, into: &plan)
-            } else if let existing = clip.wordTimings, existing != newTimings, let provenance = clip.generatedText {
-                // Provenance preserved as-is: fabricating generatedText here would silently promote
-                // hand-authored (nil-provenance) captions to clean.
+            } else if let existing = clip.wordTimings, existing != newTimings {
+                // Timing-only refresh for EVERY clip — generatedText: nil leaves provenance
+                // untouched, so hand-authored captions are never promoted to clean.
                 plan.replacements.append(.init(
                     clipId: clip.id, text: newText, wordTimings: newTimings,
-                    generatedText: provenance))
+                    generatedText: nil))
             }
             if clip.resyncConflict == true { plan.clearedFlags.append(clip.id) }
             return
