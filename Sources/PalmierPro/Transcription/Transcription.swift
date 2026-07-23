@@ -22,13 +22,19 @@ struct TranscriptionWord: Sendable, Codable {
     /// false = timing is interpolated, not acoustically aligned (CJK runs the timing
     /// track couldn't anchor). nil = engine-native timing with no alignment distinction.
     let aligned: Bool?
+    /// true = this word sits in a span the decoder likely interleaved across a rapid zh/en
+    /// code-switch (or overlapping voices) — the text order is unreliable and needs review.
+    /// nil = no such evidence (also all transcripts cached before this flag existed).
+    let codeSwitch: Bool?
 
-    init(text: String, start: Double?, end: Double?, speaker: String? = nil, aligned: Bool? = nil) {
+    init(text: String, start: Double?, end: Double?, speaker: String? = nil, aligned: Bool? = nil,
+         codeSwitch: Bool? = nil) {
         self.text = text
         self.start = start
         self.end = end
         self.speaker = speaker
         self.aligned = aligned
+        self.codeSwitch = codeSwitch
     }
 }
 
@@ -80,7 +86,8 @@ struct TranscriptionResult: Sendable, Codable {
                     start: $0.start.map { $0 + offset },
                     end: $0.end.map { $0 + offset },
                     speaker: $0.speaker,
-                    aligned: $0.aligned
+                    aligned: $0.aligned,
+                    codeSwitch: $0.codeSwitch
                 )
             },
             segments: segments.map {

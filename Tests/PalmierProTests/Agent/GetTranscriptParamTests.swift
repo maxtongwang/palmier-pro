@@ -108,6 +108,51 @@ struct GetTranscriptParamTests {
         #expect(scoped["complete"] == nil)
     }
 
+    @Test func codeSwitchSpansCollapseFlaggedRuns() async throws {
+        func w(_ i: Int, _ text: String, _ start: Int, cs: Bool? = nil) -> TimelineWord {
+            TimelineWord(index: i, clipId: "c1", trackIndex: 0, clipStartFrame: 0, clipEndFrame: 300,
+                         text: text, startFrame: start, endFrame: start + 10, speaker: nil, codeSwitch: cs)
+        }
+        // Two flagged runs separated by a clean word → two spans, not one merged.
+        let transcript = TimelineTranscript(
+            context: .init(provider: .local, preferredLocale: nil),
+            words: [
+                w(0, "你", 0), w(1, "going", 10, cs: true), w(2, "了", 20, cs: true),
+                w(3, "好", 30), w(4, "how", 40, cs: true), w(5, "的", 50),
+            ],
+            skipped: [],
+            resolvedModel: "qwen3-asr-0.6B-int8"
+        )
+        let out = transcript.responsePayload(fps: 30, clipId: nil, startFrame: nil, endFrame: nil, maxWords: 100)
+        let spans = out["codeSwitchSpans"] as? [[Any]]
+        #expect(spans?.count == 2)
+        #expect(spans?.first?[0] as? String == "c1")
+        #expect(spans?.first?[1] as? Int == 10)
+        #expect(spans?.first?[2] as? Int == 30)
+        #expect(spans?.last?[1] as? Int == 40)
+        #expect(spans?.last?[2] as? Int == 50)
+        #expect(out["codeSwitchNote"] is String)
+        // Word rows keep their compact shape — the flag lives only in the span list.
+        let rows = ((out["clips"] as? [[String: Any]])?.first?["words"]) as? [[Any]]
+        #expect(rows?.allSatisfy { $0.count == 3 } == true)
+    }
+
+    @Test func noCodeSwitchSurfaceWhenNothingFlagged() async throws {
+        func w(_ i: Int, _ text: String, _ start: Int) -> TimelineWord {
+            TimelineWord(index: i, clipId: "c1", trackIndex: 0, clipStartFrame: 0, clipEndFrame: 300,
+                         text: text, startFrame: start, endFrame: start + 10, speaker: nil)
+        }
+        let transcript = TimelineTranscript(
+            context: .init(provider: .local, preferredLocale: nil),
+            words: [w(0, "你", 0), w(1, "好", 10)],
+            skipped: [],
+            resolvedModel: "qwen3-asr-0.6B-int8"
+        )
+        let out = transcript.responsePayload(fps: 30, clipId: nil, startFrame: nil, endFrame: nil, maxWords: 100)
+        #expect(out["codeSwitchSpans"] == nil)
+        #expect(out["codeSwitchNote"] == nil)
+    }
+
     @Test func sentenceRowsSplitOnCJKAndDoubledTerminals() async throws {
         func w(_ i: Int, _ text: String, _ start: Int, _ end: Int) -> TimelineWord {
             TimelineWord(index: i, clipId: "c1", trackIndex: 0, clipStartFrame: 0, clipEndFrame: 600,

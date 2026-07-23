@@ -134,7 +134,7 @@ actor Qwen3ASREngine {
         // `raw` is the model's unpunctuated stream (drives piece timing); `text` carries restored
         // punctuation for the segment and — folded onto pieces — for the words. When the punct model
         // is unavailable, restore() returns the input and `text == raw`.
-        var chunks: [(text: String, raw: String, start: Double, end: Double)] = []
+        var chunks: [(text: String, raw: String, start: Double, end: Double, interleaved: Bool)] = []
         var decodeTime = Duration.zero
         var restoreTime = Duration.zero
         var chunkStart = 0
@@ -152,13 +152,31 @@ actor Qwen3ASREngine {
             let start = Double(chunkStart) / Double(EngineAudio.sampleRate)
             let end = Double(chunkEnd) / Double(EngineAudio.sampleRate)
             let decodeStart = ContinuousClock.now
-            let raw = Self.decodeChunk(recognizer: recognizer, samples: chunk)
+            var raw = Self.decodeChunk(recognizer: recognizer, samples: chunk)
+
+            // Code-switch seam guard: a chunk holding both languages (or two overlapping voices)
+            // can come out of the single greedy pass with the two token streams interleaved into
+            // out-of-order salad. Re-decode the chunk in short quiet-split sub-chunks — time order
+            // across sub-chunks is enforced by construction, so cross-seam interleave cannot
+            // survive — and keep whichever text alternates less. Whatever remains salad is flagged
+            // on its words rather than shipped as confident text.
+            var interleaved = false
+            if !raw.isEmpty, CodeSwitchAnalyzer.isInterleaved(pieces: Self.splitPieces(text: raw)) {
+                let refined = Self.decodeFineGrained(recognizer: recognizer, samples: chunk)
+                let choice = CodeSwitchAnalyzer.preferred(
+                    original: Self.splitPieces(text: raw),
+                    refined: Self.splitPieces(text: refined))
+                if choice.useRefined { raw = refined }
+                interleaved = choice.stillInterleaved
+                Log.transcription.notice(
+                    "qwen3 code-switch seam chunk=\(String(format: "%.1f-%.1f", start, end)) refined=\(choice.useRefined) flagged=\(interleaved)")
+            }
             decodeTime += decodeStart.duration(to: .now)
             if !raw.isEmpty {
                 let restoreStart = ContinuousClock.now
                 let text = await restorer.restore(raw)
                 restoreTime += restoreStart.duration(to: .now)
-                chunks.append((text, raw, start, end))
+                chunks.append((text, raw, start, end, interleaved))
             }
             chunkStart = chunkEnd
         }
@@ -221,7 +239,8 @@ actor Qwen3ASREngine {
                     start: start,
                     end: end,
                     speaker: word.speaker,
-                    aligned: moved ? false : word.aligned
+                    aligned: moved ? false : word.aligned,
+                    codeSwitch: chunk.interleaved ? true : nil
                 )
             })
             segments.append(TranscriptionSegment(
@@ -317,6 +336,26 @@ actor Qwen3ASREngine {
         guard let created else { throw EngineError.recognizerInitFailed }
         recognizer = created
         return created
+    }
+
+    /// Sub-chunk length for the code-switch re-decode: long enough for decoding context, short
+    /// enough that a chunk rarely straddles more than one language boundary.
+    private static let fineChunkSeconds = 4.0
+
+    /// Re-decode audio in short quiet-split sub-chunks and join the texts in time order. Used only
+    /// on chunks whose single-pass decode came out interleaved; concatenation by time bounds how
+    /// far any token can stray from where it was spoken.
+    private static func decodeFineGrained(recognizer: OpaquePointer, samples: [Float]) -> String {
+        var texts: [String] = []
+        var start = 0
+        while start < samples.count {
+            let end = EngineAudio.chunkBoundary(
+                samples: samples, from: start, targetSeconds: fineChunkSeconds, searchSpanSeconds: 1.2)
+            let text = decodeChunk(recognizer: recognizer, samples: Array(samples[start..<end]))
+            if !text.isEmpty { texts.append(text) }
+            start = end
+        }
+        return texts.joined(separator: " ")
     }
 
     private static func decodeChunk(recognizer: OpaquePointer, samples: [Float]) -> String {

@@ -17,7 +17,9 @@ extension TranscriptionResult {
                 text: text.isEmpty ? text : corrector.correct(text),
                 start: word.start,
                 end: word.end,
-                speaker: word.speaker
+                speaker: word.speaker,
+                aligned: word.aligned,
+                codeSwitch: word.codeSwitch
             )
         }
 
