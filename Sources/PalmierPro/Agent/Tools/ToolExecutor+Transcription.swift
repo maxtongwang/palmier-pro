@@ -33,6 +33,9 @@ struct TimelineWord {
     /// False when the word's times are interpolated rather than acoustically anchored — a cut
     /// planner must not derive cut points from such rows.
     var aligned: Bool? = nil
+    /// True when the word sits in a span the decoder likely interleaved across a rapid zh/en
+    /// code-switch (or overlapping voices) — surfaced as codeSwitchSpans in get_transcript.
+    var codeSwitch: Bool? = nil
 }
 
 struct TimelineTranscript {
@@ -81,6 +84,7 @@ struct TimelineTranscript {
         var lastEnd: Int?
         var speakerRuns: [[Any]] = []
         var currentSpeaker: String??
+        var codeSwitchSpans: [[Any]] = []
 
         // A clip is in `clips` or in `pending`, never both — a mid-transcription clip must not be
         // mistakable for a settled one by an automated diff pass.
@@ -102,6 +106,20 @@ struct TimelineTranscript {
                 }
             }
             guard !visible.isEmpty else { continue }
+            // Consecutive flagged words collapse into [clipId, startFrame, endFrame] spans so the
+            // ~handful of unreliable seams are findable without a per-word column.
+            var spanStart: Int?
+            var spanEnd = 0
+            for word in visible {
+                if word.codeSwitch == true {
+                    if spanStart == nil { spanStart = word.startFrame }
+                    spanEnd = max(spanEnd, word.endFrame)
+                } else if let start = spanStart {
+                    codeSwitchSpans.append([group.clipId, start, spanEnd])
+                    spanStart = nil
+                }
+            }
+            if let start = spanStart { codeSwitchSpans.append([group.clipId, start, spanEnd]) }
             var clipOut: [String: Any] = [
                 "clipId": group.clipId,
                 "trackIndex": group.trackIndex,
@@ -139,6 +157,10 @@ struct TimelineTranscript {
         if includesSpeakers, !speakerRuns.isEmpty {
             out["speakers"] = speakerRuns
             out["speakersNote"] = "[firstWordIndex, speaker] — each run holds until the next entry."
+        }
+        if !codeSwitchSpans.isEmpty {
+            out["codeSwitchSpans"] = codeSwitchSpans
+            out["codeSwitchNote"] = "[clipId, startFrame, endFrame] — rapid zh/en switching (or overlapping voices) likely interleaved the words in these spans; the text order is unreliable. Review them by ear before trusting or building captions from them."
         }
         if totalWords > maxWords {
             out["totalWords"] = totalWords
@@ -450,7 +472,8 @@ extension ToolExecutor {
                     startFrame: row.start,
                     endFrame: row.end,
                     speaker: row.speaker.map { speakerMap[frag.clip.mediaRef]?[$0] ?? $0 },
-                    aligned: row.aligned
+                    aligned: row.aligned,
+                    codeSwitch: row.codeSwitch
                 ))
             }
         }
@@ -631,15 +654,15 @@ extension ToolExecutor {
         return ranges
     }
 
-    private func timelineRows(from transcript: TranscriptionResult, clip: Clip, fps: Int) -> [(start: Int, end: Int, text: String, speaker: String?, aligned: Bool?)] {
+    private func timelineRows(from transcript: TranscriptionResult, clip: Clip, fps: Int) -> [(start: Int, end: Int, text: String, speaker: String?, aligned: Bool?, codeSwitch: Bool?)] {
         let visible = CaptionTranscriptMapper.sourceSpan(for: clip)
         let rate = Double(fps)
-        let rows = transcript.words.compactMap { word -> (start: Int, end: Int, text: String, speaker: String?, aligned: Bool?)? in
+        let rows = transcript.words.compactMap { word -> (start: Int, end: Int, text: String, speaker: String?, aligned: Bool?, codeSwitch: Bool?)? in
             guard let start = word.start, let end = word.end else { return nil }
             let midFrame = (start + end) / 2 * rate
             guard midFrame >= visible.start, midFrame < visible.end,
                   let frameSpan = Self.spanFrames(start: start, end: end, clip: clip, fps: fps) else { return nil }
-            return (frameSpan.start, frameSpan.end, word.text, word.speaker, word.aligned)
+            return (frameSpan.start, frameSpan.end, word.text, word.speaker, word.aligned, word.codeSwitch)
         }
         return rows.sorted { ($0.start, $0.end) < ($1.start, $1.end) }
     }

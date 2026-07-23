@@ -6,9 +6,9 @@ Use this manifest to: triage upstream-merge conflicts (find the owning feature f
 
 ## 1. On-device multilingual ASR
 
-zh/en code-switched transcription: Qwen3-ASR 0.6B (authoritative text) + WhisperKit (timing anchor), engine routing with Apple fallback, identity-keyed transcript cache with per-engine slots. Design: `1-multilingual-asr.md`, `8-transcription-model.md`.
+zh/en code-switched transcription: Qwen3-ASR 0.6B (authoritative text) + WhisperKit (timing anchor), engine routing with Apple fallback, identity-keyed transcript cache with per-engine slots, code-switch seam guard (interleave detection, fine sub-chunk re-decode, codeSwitchSpans flagging in get_transcript). Design: `1-multilingual-asr.md`, `8-transcription-model.md`.
 
-- New: `Transcription/Engines/{Qwen3ASREngine,WhisperKitEngine,EngineAudio,SpeechModels}.swift`, `Transcription/LocalSpeechEngine.swift`, `scripts/fetch-sherpa.sh`, `Vendor/` (git-excluded binary)
+- New: `Transcription/Engines/{Qwen3ASREngine,WhisperKitEngine,EngineAudio,SpeechModels,CodeSwitchAnalyzer}.swift`, `Transcription/LocalSpeechEngine.swift`, `scripts/fetch-sherpa.sh`, `Vendor/` (git-excluded binary)
 - Hooks: `Transcription/Transcription.swift` (+87), `Transcription/TranscriptCache.swift` (+133), `Settings/StoragePane.swift` (+45)
 
 ## 2. zh-en punctuation restoration

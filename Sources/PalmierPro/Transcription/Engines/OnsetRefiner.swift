@@ -44,7 +44,8 @@ enum OnsetRefiner {
             let refined = max(lowerBound, min(start, onset - lead))
             guard refined < start else { continue }   // only ever lead in, never push a start later
             out[index] = TranscriptionWord(
-                text: word.text, start: refined, end: end, speaker: word.speaker, aligned: word.aligned)
+                text: word.text, start: refined, end: end, speaker: word.speaker, aligned: word.aligned,
+                codeSwitch: word.codeSwitch)
         }
         return out
     }
