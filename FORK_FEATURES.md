@@ -89,13 +89,14 @@ Resync toast/badge/freeze toggle, glossary review with one-click Confirm, model 
 
 Files several features touch — expect merge conflicts here first, resolve feature-by-feature:
 
-| File                                                           | Serves                                                      |
-| -------------------------------------------------------------- | ----------------------------------------------------------- |
-| `Agent/Tools/ToolDefinitions.swift` (+186)                     | every feature with a tool schema                            |
-| `Models/Timeline.swift` (+60/−30)                              | resync provenance fields, timing model, decoder restructure |
-| `ToolExecutor+Texts.swift` (+213)                              | glossary promotion, entries batching, lint application      |
-| `ToolExecutor+Transcription.swift` (+263)                      | ASR routing, indexing contract, aligned flag                |
-| `AgentInstructions.swift`, `AppTheme.swift`, `Constants.swift` | small cross-feature additions                               |
+| File                                                           | Serves                                                                                                  |
+| -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `Agent/Tools/ToolDefinitions.swift` (+186)                     | every feature with a tool schema                                                                        |
+| `Models/Timeline.swift` (+60/−30)                              | resync provenance fields, timing model, decoder restructure                                             |
+| `ToolExecutor+Texts.swift` (+213)                              | glossary promotion, entries batching, lint application                                                  |
+| `CaptionsTab/CaptionSpecBuilder.swift`                         | upstream's off-main spec build; carries our segmentation, punctuation, protected phrases, filler policy |
+| `ToolExecutor+Transcription.swift` (+263)                      | ASR routing, indexing contract, aligned flag                                                            |
+| `AgentInstructions.swift`, `AppTheme.swift`, `Constants.swift` | small cross-feature additions                                                                           |
 
 ## Tests
 

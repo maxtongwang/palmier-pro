@@ -2,22 +2,23 @@
   "changelogURL": "https://github.com/palmier-io/palmier-pro/releases",
   "entries": [
     {
-      "version": "0.6.12",
-      "date": "2026-07-19",
+      "version": "0.6.14",
+      "date": "2026-07-21",
       "sections": [
         {
           "heading": "New",
           "items": [
-            "Text Stencil: new text stencil support.",
-            "Drop Finder files onto the timeline: Easier way to drag files from your computer directly onto the timeline.",
-            "Agent new tool: Agent can now capture frames from your timeline."
+            "Agent can set fade in and fade out for audio and video clips",
+            "Preview playback speed control: Watch your timeline in 0.5x, 2x, 4x, or 10x speed, without modifying the timeline",
+            "Text rotation: You can now rotate text clips"
           ]
         },
         {
           "heading": "Improved",
           "items": [
-            "Claude Desktop MCP server: We released mcpb 2.0 where it eliminates the need to reinstall the MCP server to Claude Desktop on every update. You do need to re-install one more time to update to 2.0.",
-            "Rendering: Better audio meter rendering to improve performance."
+            "Agent can set fade in and fade out for audio and video clips",
+            "Better rendering for large timelines",
+            "Better project management: In home page, you can search, select and delete multiple projects"
           ]
         }
       ]

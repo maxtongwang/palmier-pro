@@ -131,7 +131,14 @@ struct CaptionTab: View {
             // Snapshot on appear; agent set_project_settings changes reflect on next tab open.
             provider = providerForPreference(editor.transcriptionPreference)
         }
-        .onChange(of: editor.selectedClipIds) { _, _ in rememberSelectedClipTargets() }
+        .onChange(of: editor.selectedClipIds) { _, _ in
+            guard !editor.isMarqueeSelecting else { return }
+            rememberSelectedClipTargets()
+        }
+        .onChange(of: editor.isMarqueeSelecting) { wasSelecting, isSelecting in
+            guard wasSelecting, !isSelecting else { return }
+            rememberSelectedClipTargets()
+        }
         .task(id: costEstimateKey) {
             estimatedCloudCost = nil
             guard provider == .cloud, effectiveCount > 0 else { return }
