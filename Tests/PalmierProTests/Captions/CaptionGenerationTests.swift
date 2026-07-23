@@ -99,7 +99,11 @@ private func mediaAsset(_ id: String, hasAudio: Bool = true) -> MediaAsset {
             center: CGPoint(x: 0.5, y: 0.8),
             textCase: .upper,
             maxWords: nil,
-            animation: nil
+            animation: nil,
+            segmentation: .default,
+            punctuation: .keep,
+            protectedPhrases: [],
+            fillerPolicy: nil
         )
 
         let specs = try await CaptionSpecBuilder.build(input)
